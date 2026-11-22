@@ -6,7 +6,9 @@
 //! - draws the Windwood art and the prince (interpolated between steps),
 //! - turns simulation events into simple effects and HUD messages,
 //! - moves a smoothed follow camera,
-//! - waits for the scene to be drawable before play starts (`readiness`).
+//! - waits for the scene to be drawable before play starts (`readiness`),
+//! - opens on the main menu (`menu`); the game world is spawned once, on
+//!   entering `AppState::InGame`.
 
 pub mod animation;
 mod background;
@@ -14,6 +16,7 @@ mod debug;
 mod effects;
 mod hud;
 pub mod manifest;
+pub mod menu;
 pub mod readiness;
 pub mod review;
 mod tiles;
@@ -22,6 +25,8 @@ mod world;
 
 use bevy::prelude::*;
 use game_core as gc;
+
+pub use menu::AppState;
 
 /// Internal render resolution in render pixels (M2 standard).
 pub const RENDER_WIDTH: u32 = 640;
@@ -70,10 +75,15 @@ impl Plugin for GamePlugin {
                 level,
                 gc::MovementConfig::default(),
             )))
+            .insert_state(menu::initial_state())
             .add_plugins(readiness::ReadinessPlugin)
             .add_plugins(debug::DebugPlugin)
+            .add_plugins(menu::MenuPlugin)
+            // The world is built exactly once, when play begins (straight
+            // away when the menu is skipped: the initial state's OnEnter
+            // runs before Startup).
             .add_systems(
-                Startup,
+                OnEnter(AppState::InGame),
                 (
                     world::spawn_level,
                     background::spawn_backdrop,
@@ -101,20 +111,24 @@ impl Plugin for GamePlugin {
                     hud::update_guide,
                     hud::update_hud,
                 )
-                    .chain(),
+                    .chain()
+                    .run_if(in_state(AppState::InGame)),
             );
         if review {
-            app.add_systems(Startup, review::setup_review.after(world::spawn_level))
-                .add_systems(PostStartup, review::apply_review_env)
-                .add_systems(
-                    Update,
-                    (
-                        review::review_controls,
-                        review::review_camera
-                            .after(view::follow_camera)
-                            .before(background::follow_backdrop),
-                    ),
-                );
+            app.add_systems(
+                OnEnter(AppState::InGame),
+                review::setup_review.after(world::spawn_level),
+            )
+            .add_systems(PostStartup, review::apply_review_env)
+            .add_systems(
+                Update,
+                (
+                    review::review_controls,
+                    review::review_camera
+                        .after(view::follow_camera)
+                        .before(background::follow_backdrop),
+                ),
+            );
         }
     }
 }

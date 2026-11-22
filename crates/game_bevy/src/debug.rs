@@ -8,10 +8,12 @@
 //! - `CROWNWIND_SCREENSHOT=<file.png>`: save a screenshot of the window and
 //!   exit. `CROWNWIND_SCREENSHOT_AT=<seconds>` sets when (default 1.5 s),
 //!   counted from the moment the scene is ready (art loaded and render
-//!   pipelines compiled, see `readiness`).
+//!   pipelines compiled, see `readiness`), or from when the main menu's art
+//!   loaded if the run starts on the menu (`CROWNWIND_MENU=1`).
 //! - `CROWNWIND_SCREENSHOT_SERIES=<dir>`: startup diagnosis, a screenshot
 //!   every 0.2 s of real time from launch for 3 s, then exit.
 //! - `CROWNWIND_STARTUP_TRACE=1`: log render-pipeline readiness per frame.
+//! - `CROWNWIND_FPS_LOG=1`: log frame-time diagnostics every second.
 
 use std::collections::VecDeque;
 
@@ -27,6 +29,12 @@ pub struct DebugPlugin;
 impl Plugin for DebugPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, apply_start_options);
+        if std::env::var("CROWNWIND_FPS_LOG").is_ok_and(|v| v == "1") {
+            app.add_plugins((
+                bevy::diagnostic::FrameTimeDiagnosticsPlugin::default(),
+                bevy::diagnostic::LogDiagnosticsPlugin::default(),
+            ));
+        }
         let automated = std::env::var("CROWNWIND_SCREENSHOT").is_ok()
             || std::env::var("CROWNWIND_AUTOPLAY").is_ok_and(|v| v == "1");
         if automated {
@@ -143,9 +151,11 @@ fn screenshot_and_exit(
     mut req: ResMut<ScreenshotRequest>,
     mut exit: MessageWriter<AppExit>,
     scene: Res<SceneReady>,
+    menu: Res<crate::menu::MenuReady>,
 ) {
-    // Count time from the moment the scene is actually drawable.
-    if !scene.is_ready() {
+    // Count time from the moment the scene (or the main menu, when the run
+    // starts on it) is actually drawable.
+    if !scene.is_ready() && !menu.0 {
         return;
     }
     req.elapsed += time.delta_secs();
