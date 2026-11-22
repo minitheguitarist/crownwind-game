@@ -1,34 +1,23 @@
 //! Engine-independent rules for the Crownwind prototype.
 //!
-//! Claude's first shift should extend this crate with tested, deterministic
-//! player movement and collision rules. It must not import Bevy.
+//! Conventions:
+//! - World units are pixels; +x right, +y up.
+//! - The placeholder level uses a 16 px tile grid ([`level::TILE_SIZE`]).
+//! - Gameplay advances only in fixed steps of [`movement::FIXED_DT`].
+//!
+//! This crate must not depend on Bevy.
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Vec2 {
-    pub x: f32,
-    pub y: f32,
-}
+pub mod camera;
+pub mod geometry;
+pub mod level;
+pub mod movement;
+pub mod simulation;
 
-impl Vec2 {
-    pub const ZERO: Self = Self { x: 0.0, y: 0.0 };
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct PlayerState {
-    pub position: Vec2,
-    pub velocity: Vec2,
-    pub grounded: bool,
-}
-
-impl Default for PlayerState {
-    fn default() -> Self {
-        Self {
-            position: Vec2::ZERO,
-            velocity: Vec2::ZERO,
-            grounded: false,
-        }
-    }
-}
+pub use camera::CameraFollow;
+pub use geometry::{Rect, Vec2};
+pub use level::{Level, TILE_SIZE, test_course};
+pub use movement::{FIXED_DT, MovementConfig, PlayerInput, PlayerState, step};
+pub use simulation::Simulation;
 
 #[cfg(test)]
 mod tests {
