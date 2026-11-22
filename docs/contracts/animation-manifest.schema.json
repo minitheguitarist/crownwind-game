@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Crownwind Animation Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "character_id",
+    "frame_width",
+    "frame_height",
+    "animations"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "character_id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "frame_width": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "frame_height": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "pivot": {
+      "type": "object",
+      "required": [
+        "x",
+        "y"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "type": "number"
+        },
+        "y": {
+          "type": "number"
+        }
+      }
+    },
+    "animations": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "required": [
+          "frames",
+          "fps",
+          "loop"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "frames": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "fps": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "maximum": 60
+          },
+          "loop": {
+            "type": "boolean"
+          }
+        }
+      }
+    }
+  }
+}

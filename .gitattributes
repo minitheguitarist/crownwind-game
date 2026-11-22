@@ -1,0 +1,7 @@
+* text=auto
+*.png binary
+*.ase binary
+*.aseprite binary
+*.ogg binary
+*.wav binary
+*.flac binary

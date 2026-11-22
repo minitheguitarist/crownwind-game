@@ -1,0 +1,18 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/game_core",
+    "crates/game_bevy",
+    "crates/game_app",
+    "crates/asset_pipeline",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+
+[workspace.dependencies]
+bevy = "=0.20.1"
+game_core = { path = "crates/game_core" }
+game_bevy = { path = "crates/game_bevy" }
