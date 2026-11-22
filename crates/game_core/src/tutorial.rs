@@ -30,22 +30,22 @@ fn tile_rect(x0: i32, y0: i32, x1: i32, y1: i32) -> Rect {
 }
 
 /// Solid ground column from far below up to surface `top`.
-fn ground(x0: i32, x1: i32, top: i32) -> Rect {
+pub fn ground(x0: i32, x1: i32, top: i32) -> Rect {
     tile_rect(x0, BASE_TY, x1, top)
 }
 
 /// One-tile-thick floating ledge whose surface is at `top`.
-fn ledge(x0: i32, x1: i32, top: i32) -> Rect {
+pub fn ledge(x0: i32, x1: i32, top: i32) -> Rect {
     tile_rect(x0, top - 1, x1, top)
 }
 
 /// Wall spanning tile rows `y0..y1`.
-fn wall(x0: i32, x1: i32, y0: i32, y1: i32) -> Rect {
+pub fn wall(x0: i32, x1: i32, y0: i32, y1: i32) -> Rect {
     tile_rect(x0, y0, x1, y1)
 }
 
 /// Spike strip lying on a surface at `top` (8 px tall).
-fn spikes(x0: i32, x1: i32, top: i32) -> Rect {
+pub fn spikes(x0: i32, x1: i32, top: i32) -> Rect {
     Rect::new(
         x0 as f32 * TILE_SIZE,
         top as f32 * TILE_SIZE,

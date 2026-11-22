@@ -1,6 +1,9 @@
 //! Windwood backdrop plates (sky, distant forest).
 //!
-//! Both plates are exactly one 480×270 view and are **not** horizontally
+//! Both plates are 480×270 texels, drawn at 1 unit per texel (legacy
+//! density). Since M2 the view is 320×180 units, so a plate is larger than
+//! the view and is shown cropped (sky top-aligned, forest bottom-aligned).
+//! The plates are **not** horizontally
 //! seamless, so they are never repeated naïvely:
 //! - **Sky** is locked to the view (no parallax). It is the most distant
 //!   layer, so a fixed sky reads as "infinitely far away".
@@ -21,7 +24,18 @@
 use bevy::prelude::*;
 
 use crate::ArtHandles;
-use crate::VIRTUAL_WIDTH;
+use crate::{VIEW_HEIGHT, VIEW_WIDTH};
+
+/// Backdrop plate size in texels; drawn at 1 unit per texel (legacy art
+/// density, 2×2 render pixels per art pixel).
+pub const PLATE_W: f32 = 480.0;
+pub const PLATE_H: f32 = 270.0;
+/// How far the forest plate's bottom sits *below* the view bottom. The
+/// plate is taller than the 180-unit view; sinking it keeps the tree line
+/// at ~58% of the view height so the sky plate's mountains stay visible.
+/// The hidden base is behind the terrain (and the plate still reaches below
+/// the view in open pits, so no gap can appear).
+pub const FOREST_SINK: f32 = 45.0;
 use crate::view::MainCamera;
 
 pub const SKY_PATH: &str = "environment/windwood/sky.png";
@@ -50,14 +64,14 @@ pub struct ForestOrigin(pub f32);
 
 /// Leftmost camera center for a level (view clamped to its bounds).
 pub fn leftmost_camera_x(level: &game_core::Level) -> f32 {
-    crate::view::camera_bounds(level).left() + VIRTUAL_WIDTH * 0.5
+    crate::view::camera_bounds(level).left() + VIEW_WIDTH * 0.5
 }
 
 /// Plate-space position of the view's left edge (period 960 = normal plate
 /// followed by its mirror).
 pub fn forest_local(camera_x: f32, origin_x: f32) -> f32 {
     let scroll = ((camera_x - origin_x) * FOREST_PARALLAX).round() + FOREST_PHASE;
-    scroll.rem_euclid(2.0 * VIRTUAL_WIDTH)
+    scroll.rem_euclid(2.0 * PLATE_W)
 }
 
 /// Horizontal placement of forest copy `k` for a camera at `camera_x`.
@@ -67,7 +81,7 @@ pub fn forest_local(camera_x: f32, origin_x: f32) -> f32 {
 /// (normal + mirrored), so copies 0..=2 always cover the 480 px view.
 pub fn forest_copy(camera_x: f32, origin_x: f32, k: i32) -> (f32, bool) {
     let local = forest_local(camera_x, origin_x);
-    (k as f32 * VIRTUAL_WIDTH - local, k.rem_euclid(2) == 1)
+    (k as f32 * PLATE_W - local, k.rem_euclid(2) == 1)
 }
 
 pub fn spawn_backdrop(
@@ -110,15 +124,17 @@ pub fn follow_backdrop(
     };
     let c = cam.translation;
     if let Ok(mut t) = sky.single_mut() {
+        // Plate (480×270 units) is larger than the 320×180 view: center it
+        // horizontally and align its *top* to the view top (sun, peaks).
         t.translation.x = c.x;
-        t.translation.y = c.y;
+        t.translation.y = c.y + VIEW_HEIGHT * 0.5 - PLATE_H * 0.5;
     }
-    let view_left = c.x - VIRTUAL_WIDTH * 0.5;
+    let view_left = c.x - VIEW_WIDTH * 0.5;
     for (plate, mut t, mut sprite) in &mut forest {
         let (left, mirrored) = forest_copy(c.x, origin.0, plate.0);
-        t.translation.x = view_left + left + VIRTUAL_WIDTH * 0.5;
-        // Same size as the view: centered on it = bottom edges coincide.
-        t.translation.y = c.y;
+        t.translation.x = view_left + left + PLATE_W * 0.5;
+        // Plate bottom FOREST_SINK units below the view bottom.
+        t.translation.y = c.y - VIEW_HEIGHT * 0.5 - FOREST_SINK + PLATE_H * 0.5;
         if sprite.flip_x != mirrored {
             sprite.flip_x = mirrored;
         }
@@ -134,14 +150,14 @@ mod tests {
         let mut spans: Vec<(f32, f32)> = (0..=2)
             .map(|k| {
                 let (l, _) = forest_copy(camera_x, 0.0, k);
-                (l, l + VIRTUAL_WIDTH)
+                (l, l + PLATE_W)
             })
             .collect();
         spans.sort_by(|a, b| a.0.total_cmp(&b.0));
         let contiguous = spans.windows(2).all(|w| w[0].1 == w[1].0);
         let first = spans[0].0;
         let last = spans[2].1;
-        contiguous && first <= 0.0 && last >= VIRTUAL_WIDTH
+        contiguous && first <= 0.0 && last >= VIEW_WIDTH
     }
 
     #[test]
@@ -176,27 +192,36 @@ mod tests {
         let (left0, m0) = forest_copy(0.0, 0.0, 0);
         let (left1, m1) = forest_copy(0.0, 0.0, 1);
         assert!(!m0 && m1);
-        assert_eq!(left1 - left0, VIRTUAL_WIDTH);
+        assert_eq!(left1 - left0, PLATE_W);
     }
 
     #[test]
     fn tutorial_never_shows_the_left_edge_seam() {
         // Over the whole camera range of the tutorial, the visible plate
-        // window [local, local + 480] stays strictly inside (0, 960): the
+        // window [local, local + view width] stays strictly inside (0, 960): the
         // only seam that can appear is the unobtrusive one at 480.
         let level = game_core::tutorial_level();
         let b = crate::view::camera_bounds(&level);
         let lo = leftmost_camera_x(&level);
-        let hi = b.right() - VIRTUAL_WIDTH * 0.5;
+        let hi = b.right() - VIEW_WIDTH * 0.5;
         assert!(hi > lo);
         let mut x = lo;
         while x <= hi {
             let local = forest_local(x, lo);
-            assert!(
-                local > 0.0 && local + VIRTUAL_WIDTH < 2.0 * VIRTUAL_WIDTH,
-                "x {x}"
-            );
+            assert!(local > 0.0 && local + VIEW_WIDTH < 2.0 * PLATE_W, "x {x}");
             x += 0.5;
         }
+    }
+
+    #[test]
+    fn plates_always_cover_the_view_vertically() {
+        // Sky: top-aligned, taller than the view.
+        const { assert!(PLATE_H >= VIEW_HEIGHT) };
+        // Forest: bottom below the view bottom, top above the view top.
+        let bottom = -FOREST_SINK;
+        let top = bottom + PLATE_H;
+        assert!(bottom <= 0.0 && top >= VIEW_HEIGHT);
+        // Horizontal: copies are wider than the view.
+        const { assert!(PLATE_W >= VIEW_WIDTH) };
     }
 }

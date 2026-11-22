@@ -113,6 +113,18 @@ pub fn sprite_offset(m: &AnimationManifest) -> Vec2 {
     )
 }
 
+/// [`sprite_offset`] converted to gameplay units for the frame's density.
+pub fn sprite_offset_units(m: &AnimationManifest) -> Vec2 {
+    sprite_offset(m) * crate::character_units_per_texel(m.frame_height)
+}
+
+/// On-screen size of one frame in gameplay units (always the 32×48-unit
+/// character cell for art that follows the standards).
+pub fn frame_size_units(m: &AnimationManifest) -> Vec2 {
+    Vec2::new(m.frame_width as f32, m.frame_height as f32)
+        * crate::character_units_per_texel(m.frame_height)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Animator {
     pub state: AnimState,
@@ -167,7 +179,7 @@ pub fn animate_prince(
         time.delta_secs()
     };
     let p = &sim.0.player;
-    let offset = sprite_offset(m);
+    let offset = sprite_offset_units(m);
     for (mut sprite, mut t, mut prince) in &mut q {
         let grounded = standing(p, &sim.0.level, &sim.0.config);
         let next = choose_state(prince.animator.state, p, grounded);
@@ -335,6 +347,26 @@ mod tests {
         assert_eq!(playback_rate(AnimState::Run, 400.0, 130.0), 1.0);
         assert_eq!(playback_rate(AnimState::Idle, 0.0, 130.0), 1.0);
         assert_eq!(playback_rate(AnimState::Jump, 130.0, 130.0), 1.0);
+    }
+
+    #[test]
+    fn legacy_and_m2_frames_cover_the_same_character_cell() {
+        let legacy = AnimationManifest::prince();
+        assert_eq!(frame_size_units(&legacy), Vec2::new(32.0, 48.0));
+        assert_eq!(sprite_offset_units(&legacy), Vec2::new(0.0, 21.0));
+        // A hypothetical 64×96 frame with the same proportions (pivot
+        // (32, 89) = sole row 89) lands on exactly the same cell and feet.
+        let mut m2 = legacy.clone();
+        m2.frame_width = 64;
+        m2.frame_height = 96;
+        m2.pivot = (32.0, 89.0);
+        assert_eq!(frame_size_units(&m2), Vec2::new(32.0, 48.0));
+        // Bottom of the sole row (90 texels from the top) on the feet line.
+        let o = sprite_offset_units(&m2);
+        assert_eq!(o.x, 0.0);
+        assert_eq!(o.y - 24.0 + (96.0 - 90.0) * 0.5, 0.0);
+        // Offsets stay on the 0.5-unit render-pixel grid.
+        assert_eq!((o.y * crate::PIXELS_PER_UNIT).fract(), 0.0);
     }
 
     #[test]

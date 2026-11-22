@@ -40,9 +40,15 @@ pub struct PlayerRoot;
 #[derive(Component)]
 pub struct CheckpointFlag(pub usize);
 
-/// Round to the 1-world-pixel grid used by the 480×270 virtual viewport.
+/// Round a gameplay-unit coordinate to the render-pixel grid
+/// (1 / `PIXELS_PER_UNIT` units).
+pub fn snap_scalar(v: f32) -> f32 {
+    (v * crate::PIXELS_PER_UNIT).round() / crate::PIXELS_PER_UNIT
+}
+
+/// Round to the render-pixel grid of the 640×360 internal resolution.
 pub fn snap(v: Vec2) -> Vec2 {
-    v.round()
+    Vec2::new(snap_scalar(v.x), snap_scalar(v.y))
 }
 
 fn rect_sprite(commands: &mut Commands, rect: gc::Rect, color: Color, z: f32) {
@@ -85,13 +91,18 @@ pub fn spawn_level(
             (Layer::Hazard, _) => Z_THORNS,
         };
         commands.spawn((
-            Sprite::from_atlas_image(
-                tiles_image.clone(),
-                TextureAtlas {
-                    layout: tiles_layout.clone(),
-                    index: p.index,
-                },
-            ),
+            Sprite {
+                // One tile always covers one 16-unit cell, whatever the
+                // art's texel size (16 legacy, 32 for the M2 standard).
+                custom_size: Some(Vec2::splat(TILE)),
+                ..Sprite::from_atlas_image(
+                    tiles_image.clone(),
+                    TextureAtlas {
+                        layout: tiles_layout.clone(),
+                        index: p.index,
+                    },
+                )
+            },
             // 16 px cell: center = corner + 8 keeps edges on whole pixels.
             Transform::from_xyz(p.x + TILE * 0.5, p.y + TILE * 0.5, z),
         ));
@@ -164,14 +175,17 @@ pub fn spawn_level(
         .with_children(|p| {
             p.spawn((
                 PrinceSprite::default(),
-                Sprite::from_atlas_image(
-                    prince_image,
-                    TextureAtlas {
-                        layout: prince_layout,
-                        index: first,
-                    },
-                ),
-                Transform::from_translation(crate::animation::sprite_offset(m).extend(0.0)),
+                Sprite {
+                    custom_size: Some(crate::animation::frame_size_units(m)),
+                    ..Sprite::from_atlas_image(
+                        prince_image,
+                        TextureAtlas {
+                            layout: prince_layout,
+                            index: first,
+                        },
+                    )
+                },
+                Transform::from_translation(crate::animation::sprite_offset_units(m).extend(0.0)),
             ));
         });
 }
@@ -186,7 +200,7 @@ pub fn spawn_level(
 /// is invisible horizontally. Vertically the plain `round(y)` is kept so the
 /// feet always rest exactly on the tile surface.
 pub fn render_x(player_x: f32, camera_x: f32) -> f32 {
-    camera_x.round() + (player_x - camera_x).round()
+    snap_scalar(camera_x) + snap_scalar(player_x - camera_x)
 }
 
 pub fn sync_player(
@@ -195,7 +209,7 @@ pub fn sync_player(
     mut root: Query<(&mut Transform, &mut Visibility), With<PlayerRoot>>,
 ) {
     let p = sim.0.interpolated_position();
-    let pos = Vec2::new(render_x(p.x, cam.center.x), p.y.round());
+    let pos = Vec2::new(render_x(p.x, cam.center.x), snap_scalar(p.y));
     if let Ok((mut t, mut vis)) = root.single_mut() {
         t.translation.x = pos.x;
         t.translation.y = pos.y;
@@ -237,8 +251,8 @@ mod tests {
         for i in 0..240 {
             let px = 100.0 + speed * i as f32;
             let cx = px - lag;
-            naive.insert((px.round() - cx.round()) as i32);
-            fixed.insert((render_x(px, cx) - cx.round()) as i32);
+            naive.insert(((snap_scalar(px) - snap_scalar(cx)) * 2.0) as i32);
+            fixed.insert(((render_x(px, cx) - snap_scalar(cx)) * 2.0) as i32);
         }
         assert!(naive.len() > 1, "test setup should show the wobble");
         assert_eq!(fixed.len(), 1, "prince still wobbles: {fixed:?}");
@@ -249,8 +263,9 @@ mod tests {
         for i in 0..1000 {
             let px = i as f32 * 0.37;
             let cx = px * 0.9 + 3.3;
-            assert!((render_x(px, cx) - px).abs() <= 1.0);
-            assert_eq!(render_x(px, cx).fract(), 0.0);
+            assert!((render_x(px, cx) - px).abs() <= 1.0 / crate::PIXELS_PER_UNIT);
+            // On the render-pixel grid (0.5 units).
+            assert_eq!((render_x(px, cx) * crate::PIXELS_PER_UNIT).fract(), 0.0);
         }
     }
 }

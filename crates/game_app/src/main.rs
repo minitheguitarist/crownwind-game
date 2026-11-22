@@ -9,8 +9,8 @@ fn main() {
                 .set(WindowPlugin {
                     primary_window: Some(Window {
                         title: "Crownwind \u{2014} Windwood (preview)".into(),
-                        // 2× the 480×270 virtual viewport: integer scaling.
-                        resolution: WindowResolution::new(960, 540),
+                        // 2× the 640×360 internal resolution: integer scaling.
+                        resolution: WindowResolution::new(1280, 720),
                         ..default()
                     }),
                     ..default()

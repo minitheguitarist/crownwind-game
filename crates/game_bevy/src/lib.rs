@@ -15,6 +15,7 @@ mod effects;
 mod hud;
 pub mod manifest;
 pub mod readiness;
+pub mod review;
 mod tiles;
 mod view;
 mod world;
@@ -22,14 +23,39 @@ mod world;
 use bevy::prelude::*;
 use game_core as gc;
 
-/// Virtual viewport in world pixels (480×270 design target).
-pub const VIRTUAL_WIDTH: f32 = 480.0;
-pub const VIRTUAL_HEIGHT: f32 = 270.0;
+/// Internal render resolution in render pixels (M2 standard).
+pub const RENDER_WIDTH: u32 = 640;
+pub const RENDER_HEIGHT: u32 = 360;
+/// Render pixels per gameplay unit. `game_core` keeps its units (16 per
+/// tile); the presentation draws each unit as 2×2 render pixels, so a
+/// 32×32-texel tile covers one 16-unit cell and a 64×96 character covers
+/// the 32×48-unit character cell.
+pub const PIXELS_PER_UNIT: f32 = 2.0;
+/// Visible world area in gameplay units (640×360 / 2).
+pub const VIEW_WIDTH: f32 = RENDER_WIDTH as f32 / PIXELS_PER_UNIT;
+pub const VIEW_HEIGHT: f32 = RENDER_HEIGHT as f32 / PIXELS_PER_UNIT;
+/// M2 art standards in texels.
+pub const CHARACTER_FRAME_STANDARD: (u32, u32) = (64, 96);
+pub const TILE_TEXELS_STANDARD: u32 = 32;
+/// The character cell every character art set must cover, in units.
+pub const CHARACTER_CELL_UNITS: (f32, f32) = (32.0, 48.0);
+
+/// Gameplay units covered by one texel of a character frame `frame_height`
+/// texels tall: 48-texel legacy art → 1.0, 96-texel M2 art → 0.5.
+pub fn character_units_per_texel(frame_height: u32) -> f32 {
+    CHARACTER_CELL_UNITS.1 / frame_height as f32
+}
 
 pub struct GamePlugin;
 
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
+        let review = review::enabled();
+        let level = if review {
+            review::review_level()
+        } else {
+            gc::tutorial_level()
+        };
         app.insert_resource(ClearColor(world::BACKGROUND))
             .insert_resource(AutoPause(true))
             .init_resource::<ArtHandles>()
@@ -38,7 +64,7 @@ impl Plugin for GamePlugin {
                 manifest::AnimationManifest::prince(),
             ))
             .insert_resource(GameSim(gc::Simulation::new(
-                gc::tutorial_level(),
+                level,
                 gc::MovementConfig::default(),
             )))
             .add_plugins(readiness::ReadinessPlugin)
@@ -73,6 +99,19 @@ impl Plugin for GamePlugin {
                 )
                     .chain(),
             );
+        if review {
+            app.add_systems(Startup, review::setup_review.after(world::spawn_level))
+                .add_systems(PostStartup, review::apply_review_env)
+                .add_systems(
+                    Update,
+                    (
+                        review::review_controls,
+                        review::review_camera
+                            .after(view::follow_camera)
+                            .before(background::follow_backdrop),
+                    ),
+                );
+        }
     }
 }
 
