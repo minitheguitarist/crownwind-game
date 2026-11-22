@@ -27,7 +27,7 @@ impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(ClearColor(world::BACKGROUND))
             .insert_resource(GameSim(gc::Simulation::new(
-                gc::test_course(),
+                gc::tutorial_level(),
                 gc::MovementConfig::default(),
             )))
             .add_systems(

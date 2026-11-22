@@ -11,13 +11,16 @@ pub mod camera;
 pub mod geometry;
 pub mod level;
 pub mod movement;
+pub mod route;
 pub mod simulation;
+pub mod tutorial;
 
 pub use camera::{CameraFollow, CameraTarget};
 pub use geometry::{Rect, Vec2};
 pub use level::{Checkpoint, Level, TILE_SIZE, test_course};
 pub use movement::{FIXED_DT, MovementConfig, PlayerInput, PlayerState, step};
 pub use simulation::{DeathCause, GameEvent, Phase, Simulation};
+pub use tutorial::tutorial_level;
 
 #[cfg(test)]
 mod tests {
