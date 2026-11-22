@@ -7,7 +7,11 @@
 //!   its inputs to the simulation instead of the keyboard (end-to-end demo).
 //! - `CROWNWIND_SCREENSHOT=<file.png>`: save a screenshot of the window and
 //!   exit. `CROWNWIND_SCREENSHOT_AT=<seconds>` sets when (default 1.5 s),
-//!   counted from the moment all artwork has loaded.
+//!   counted from the moment the scene is ready (art loaded and render
+//!   pipelines compiled, see `readiness`).
+//! - `CROWNWIND_SCREENSHOT_SERIES=<dir>`: startup diagnosis, a screenshot
+//!   every 0.2 s of real time from launch for 3 s, then exit.
+//! - `CROWNWIND_STARTUP_TRACE=1`: log render-pipeline readiness per frame.
 
 use std::collections::VecDeque;
 
@@ -15,7 +19,8 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use game_core as gc;
 
-use crate::{ArtReady, AutoPause, GameSim};
+use crate::readiness::SceneReady;
+use crate::{AutoPause, GameSim};
 
 pub struct DebugPlugin;
 
@@ -27,6 +32,10 @@ impl Plugin for DebugPlugin {
         if automated {
             // A background test window never has focus; do not auto-pause.
             app.insert_resource(AutoPause(false));
+        }
+        if let Ok(dir) = std::env::var("CROWNWIND_SCREENSHOT_SERIES") {
+            app.insert_resource(Series { dir, next: 0 })
+                .add_systems(Update, screenshot_series);
         }
         if let Ok(path) = std::env::var("CROWNWIND_SCREENSHOT") {
             let at = std::env::var("CROWNWIND_SCREENSHOT_AT")
@@ -99,15 +108,44 @@ pub fn run_autoplay(time: &Time, auto: &mut Autoplay, sim: &mut gc::Simulation) 
     }
 }
 
+/// `CROWNWIND_SCREENSHOT_SERIES=<dir>`: from app start (real time, not
+/// gated on readiness), save a screenshot every 0.2 s for 3 s, then exit.
+/// Used to see exactly when the world becomes visible on cold starts.
+#[derive(Resource)]
+struct Series {
+    dir: String,
+    next: u32,
+}
+
+fn screenshot_series(
+    mut commands: Commands,
+    time: Res<Time<Real>>,
+    mut series: ResMut<Series>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    let t = time.elapsed_secs();
+    if t >= series.next as f32 * 0.2 && series.next <= 15 {
+        let path = format!("{}/t{:02}.png", series.dir, series.next);
+        info!("series screenshot {} at t={t:.3}s", series.next);
+        commands
+            .spawn(Screenshot::primary_window())
+            .observe(save_to_disk(path));
+        series.next += 1;
+    }
+    if t > 3.6 {
+        exit.write(AppExit::Success);
+    }
+}
+
 fn screenshot_and_exit(
     mut commands: Commands,
     time: Res<Time>,
     mut req: ResMut<ScreenshotRequest>,
     mut exit: MessageWriter<AppExit>,
-    ready: Res<ArtReady>,
+    scene: Res<SceneReady>,
 ) {
-    // Count time from the moment the artwork is on screen.
-    if !ready.0 {
+    // Count time from the moment the scene is actually drawable.
+    if !scene.is_ready() {
         return;
     }
     req.elapsed += time.delta_secs();

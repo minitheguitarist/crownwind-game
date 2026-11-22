@@ -176,12 +176,26 @@ pub fn spawn_level(
         });
 }
 
+/// Horizontal render position of the prince on the pixel grid.
+///
+/// The camera center moves smoothly but is drawn at `round(camera_x)`. If
+/// the prince were drawn at `round(x)`, both roundings flip on different
+/// frames and the prince wobbles by 1 px on screen while the camera eases.
+/// Rounding the *offset from the camera* instead keeps the on-screen position
+/// stable; the prince may sit up to 1 px off its exact world column, which
+/// is invisible horizontally. Vertically the plain `round(y)` is kept so the
+/// feet always rest exactly on the tile surface.
+pub fn render_x(player_x: f32, camera_x: f32) -> f32 {
+    camera_x.round() + (player_x - camera_x).round()
+}
+
 pub fn sync_player(
     sim: Res<GameSim>,
+    cam: Res<crate::view::FollowCam>,
     mut root: Query<(&mut Transform, &mut Visibility), With<PlayerRoot>>,
 ) {
-    let pos = sim.0.interpolated_position();
-    let pos = snap(Vec2::new(pos.x, pos.y));
+    let p = sim.0.interpolated_position();
+    let pos = Vec2::new(render_x(p.x, cam.center.x), p.y.round());
     if let Ok((mut t, mut vis)) = root.single_mut() {
         t.translation.x = pos.x;
         t.translation.y = pos.y;
@@ -203,6 +217,40 @@ pub fn sync_checkpoints(sim: Res<GameSim>, mut flags: Query<(&CheckpointFlag, &m
         let want = if reached { FLAG_ACTIVE } else { FLAG_IDLE };
         if sprite.color != want {
             sprite.color = want;
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Prince and camera moving together at a fractional speed: the prince's
+    /// on-screen x (render position minus drawn camera position) must not
+    /// wobble, while naive independent rounding does.
+    #[test]
+    fn camera_relative_rounding_removes_one_pixel_wobble() {
+        let speed = 2.1667; // 130 px/s at 60 fps
+        let lag = 13.4; // camera trails the prince by a fractional amount
+        let mut naive = std::collections::HashSet::new();
+        let mut fixed = std::collections::HashSet::new();
+        for i in 0..240 {
+            let px = 100.0 + speed * i as f32;
+            let cx = px - lag;
+            naive.insert((px.round() - cx.round()) as i32);
+            fixed.insert((render_x(px, cx) - cx.round()) as i32);
+        }
+        assert!(naive.len() > 1, "test setup should show the wobble");
+        assert_eq!(fixed.len(), 1, "prince still wobbles: {fixed:?}");
+    }
+
+    #[test]
+    fn render_x_stays_within_one_pixel_of_world_position() {
+        for i in 0..1000 {
+            let px = i as f32 * 0.37;
+            let cx = px * 0.9 + 3.3;
+            assert!((render_x(px, cx) - px).abs() <= 1.0);
+            assert_eq!(render_x(px, cx).fract(), 0.0);
         }
     }
 }

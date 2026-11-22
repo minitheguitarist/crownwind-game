@@ -3,11 +3,10 @@
 //! All gameplay rules live in `game_core`. This crate only:
 //! - samples the keyboard into a `PlayerInput`,
 //! - advances the fixed-step `Simulation` with the real frame time,
-//! - draws placeholder shapes (interpolated between fixed steps),
+//! - draws the Windwood art and the prince (interpolated between steps),
 //! - turns simulation events into simple effects and HUD messages,
-//! - moves a smoothed follow camera.
-//!
-//! All visuals are temporary geometric placeholders (no external art).
+//! - moves a smoothed follow camera,
+//! - waits for the scene to be drawable before play starts (`readiness`).
 
 pub mod animation;
 mod background;
@@ -15,6 +14,7 @@ mod debug;
 mod effects;
 mod hud;
 pub mod manifest;
+pub mod readiness;
 mod tiles;
 mod view;
 mod world;
@@ -41,6 +41,7 @@ impl Plugin for GamePlugin {
                 gc::tutorial_level(),
                 gc::MovementConfig::default(),
             )))
+            .add_plugins(readiness::ReadinessPlugin)
             .add_plugins(debug::DebugPlugin)
             .add_systems(
                 Startup,
@@ -59,14 +60,15 @@ impl Plugin for GamePlugin {
                     pause_on_focus_loss,
                     simulate,
                     effects::process_events,
+                    view::fit_integer_scale,
+                    view::follow_camera,
                     world::sync_player,
                     animation::animate_prince,
                     world::sync_checkpoints,
                     effects::wall_slide_dust,
                     effects::animate_effects,
-                    view::fit_integer_scale,
-                    view::follow_camera,
                     background::follow_backdrop,
+                    hud::update_guide,
                     hud::update_hud,
                 )
                     .chain(),
@@ -153,9 +155,10 @@ fn simulate(
     time: Res<Time>,
     mut sim: ResMut<GameSim>,
     autoplay: Option<ResMut<debug::Autoplay>>,
-    ready: Res<ArtReady>,
+    scene: Res<readiness::SceneReady>,
 ) {
-    if !ready.0 {
+    // Play (and the run timer) starts only once the world is drawn.
+    if !scene.is_ready() {
         return;
     }
     if let Some(mut auto) = autoplay {

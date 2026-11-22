@@ -80,6 +80,16 @@ pub fn choose_state(prev: AnimState, p: &gc::PlayerState, grounded: bool) -> Ani
     }
 }
 
+/// Playback speed multiplier. The run cycle is authored for full running
+/// speed; while accelerating or slowing it plays proportionally slower (down
+/// to half speed) so the boots don't skate. Other clips play at 1×.
+pub fn playback_rate(state: AnimState, velocity_x: f32, max_run_speed: f32) -> f32 {
+    match state {
+        AnimState::Run if max_run_speed > 0.0 => (velocity_x.abs() / max_run_speed).clamp(0.5, 1.0),
+        _ => 1.0,
+    }
+}
+
 /// Atlas cell for `clip` after `time` seconds of playback.
 pub fn clip_frame(clip: &Clip, time: f32) -> usize {
     let n = (time.max(0.0) * clip.fps).floor() as usize;
@@ -161,7 +171,8 @@ pub fn animate_prince(
     for (mut sprite, mut t, mut prince) in &mut q {
         let grounded = standing(p, &sim.0.level, &sim.0.config);
         let next = choose_state(prince.animator.state, p, grounded);
-        prince.animator.update(next, dt);
+        let rate = playback_rate(next, p.velocity.x, sim.0.config.max_run_speed);
+        prince.animator.update(next, dt * rate);
         let index = prince.animator.frame(m);
         if let Some(atlas) = sprite.texture_atlas.as_mut()
             && atlas.index != index
@@ -314,6 +325,16 @@ mod tests {
         // After the same elapsed time every refresh rate shows the same cell.
         assert_eq!(at(30), at(60));
         assert_eq!(at(60), at(144));
+    }
+
+    #[test]
+    fn run_cycle_speed_follows_ground_speed() {
+        assert_eq!(playback_rate(AnimState::Run, 130.0, 130.0), 1.0);
+        assert_eq!(playback_rate(AnimState::Run, -97.5, 130.0), 0.75);
+        assert_eq!(playback_rate(AnimState::Run, 10.0, 130.0), 0.5);
+        assert_eq!(playback_rate(AnimState::Run, 400.0, 130.0), 1.0);
+        assert_eq!(playback_rate(AnimState::Idle, 0.0, 130.0), 1.0);
+        assert_eq!(playback_rate(AnimState::Jump, 130.0, 130.0), 1.0);
     }
 
     #[test]

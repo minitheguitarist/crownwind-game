@@ -10,6 +10,13 @@
 //!   it stays locked to the view bottom (no edge can be exposed).
 //!
 //! Set `FOREST_PARALLAX` to 0.0 to lock the forest to the view as well.
+//!
+//! Seam review (M1.6): of the two mirror seams, the one at the plate's
+//! *left* edge doubles a tall tree into an obvious symmetric shape, while
+//! the *right*-edge seam is unobtrusive. Parallax is therefore kept small
+//! ([`FOREST_PARALLAX`] = 0.12) and phased ([`FOREST_PHASE`]) so that over
+//! the whole tutorial camera range only the right-edge seam ever scrolls
+//! into view (unit-tested below). Real parallax needs wider/tileable plates.
 
 use bevy::prelude::*;
 
@@ -22,7 +29,10 @@ pub const FOREST_PATH: &str = "environment/windwood/forest.png";
 
 /// Fraction of camera motion the forest follows *relative to the view*
 /// (0 = locked to the screen, 1 = fixed in the world).
-pub const FOREST_PARALLAX: f32 = 0.25;
+pub const FOREST_PARALLAX: f32 = 0.12;
+/// Plate-space offset (px) of the strip when the camera is at its leftmost
+/// position; keeps the visible window clear of the left-edge seam.
+pub const FOREST_PHASE: f32 = 64.0;
 
 const Z_SKY: f32 = -100.0;
 const Z_FOREST: f32 = -90.0;
@@ -34,23 +44,39 @@ pub struct SkyPlate;
 #[derive(Component)]
 pub struct ForestPlate(pub i32);
 
+/// Leftmost camera x of the current level (forest scroll origin).
+#[derive(Resource, Clone, Copy)]
+pub struct ForestOrigin(pub f32);
+
+/// Leftmost camera center for a level (view clamped to its bounds).
+pub fn leftmost_camera_x(level: &game_core::Level) -> f32 {
+    crate::view::camera_bounds(level).left() + VIRTUAL_WIDTH * 0.5
+}
+
+/// Plate-space position of the view's left edge (period 960 = normal plate
+/// followed by its mirror).
+pub fn forest_local(camera_x: f32, origin_x: f32) -> f32 {
+    let scroll = ((camera_x - origin_x) * FOREST_PARALLAX).round() + FOREST_PHASE;
+    scroll.rem_euclid(2.0 * VIRTUAL_WIDTH)
+}
+
 /// Horizontal placement of forest copy `k` for a camera at `camera_x`.
 ///
 /// Returns (left edge of the copy relative to the view's left edge, whether
 /// the copy is mirrored). The pattern repeats every two plates
 /// (normal + mirrored), so copies 0..=2 always cover the 480 px view.
-pub fn forest_copy(camera_x: f32, k: i32) -> (f32, bool) {
-    let w = VIRTUAL_WIDTH;
-    let scroll = (camera_x * FOREST_PARALLAX).round();
-    let local = scroll.rem_euclid(2.0 * w);
-    (k as f32 * w - local, k.rem_euclid(2) == 1)
+pub fn forest_copy(camera_x: f32, origin_x: f32, k: i32) -> (f32, bool) {
+    let local = forest_local(camera_x, origin_x);
+    (k as f32 * VIRTUAL_WIDTH - local, k.rem_euclid(2) == 1)
 }
 
 pub fn spawn_backdrop(
     mut commands: Commands,
     assets: Res<AssetServer>,
+    sim: Res<crate::GameSim>,
     mut art: ResMut<ArtHandles>,
 ) {
+    commands.insert_resource(ForestOrigin(leftmost_camera_x(&sim.0.level)));
     let sky: Handle<Image> = assets.load(SKY_PATH);
     let forest: Handle<Image> = assets.load(FOREST_PATH);
     art.0.push(sky.clone().untyped());
@@ -75,6 +101,7 @@ type CameraQ<'w, 's> =
 /// Runs after the camera moved: keep plates aligned with the (snapped) view.
 pub fn follow_backdrop(
     camera: CameraQ,
+    origin: Res<ForestOrigin>,
     mut sky: Query<&mut Transform, (With<SkyPlate>, Without<ForestPlate>)>,
     mut forest: Query<(&ForestPlate, &mut Transform, &mut Sprite), Without<SkyPlate>>,
 ) {
@@ -88,7 +115,7 @@ pub fn follow_backdrop(
     }
     let view_left = c.x - VIRTUAL_WIDTH * 0.5;
     for (plate, mut t, mut sprite) in &mut forest {
-        let (left, mirrored) = forest_copy(c.x, plate.0);
+        let (left, mirrored) = forest_copy(c.x, origin.0, plate.0);
         t.translation.x = view_left + left + VIRTUAL_WIDTH * 0.5;
         // Same size as the view: centered on it = bottom edges coincide.
         t.translation.y = c.y;
@@ -106,7 +133,7 @@ mod tests {
     fn covered(camera_x: f32) -> bool {
         let mut spans: Vec<(f32, f32)> = (0..=2)
             .map(|k| {
-                let (l, _) = forest_copy(camera_x, k);
+                let (l, _) = forest_copy(camera_x, 0.0, k);
                 (l, l + VIRTUAL_WIDTH)
             })
             .collect();
@@ -128,7 +155,7 @@ mod tests {
     #[test]
     fn neighbouring_copies_alternate_mirroring() {
         for x in [0.0, 123.0, 2000.0, -50.0] {
-            let m: Vec<bool> = (0..=2).map(|k| forest_copy(x, k).1).collect();
+            let m: Vec<bool> = (0..=2).map(|k| forest_copy(x, 0.0, k).1).collect();
             assert_eq!(m, vec![false, true, false]);
         }
     }
@@ -136,7 +163,7 @@ mod tests {
     #[test]
     fn copies_land_on_whole_pixels() {
         for i in 0..500 {
-            let (l, _) = forest_copy(i as f32 * 0.731, 1);
+            let (l, _) = forest_copy(i as f32 * 0.731, 0.0, 1);
             assert_eq!(l.fract(), 0.0);
         }
     }
@@ -146,9 +173,30 @@ mod tests {
         // A plate and its mirror image meet at a shared edge column: the
         // last column of the normal plate equals the first column of the
         // mirrored one (column 479 on both sides), so no hard seam exists.
-        let (left0, m0) = forest_copy(0.0, 0);
-        let (left1, m1) = forest_copy(0.0, 1);
+        let (left0, m0) = forest_copy(0.0, 0.0, 0);
+        let (left1, m1) = forest_copy(0.0, 0.0, 1);
         assert!(!m0 && m1);
         assert_eq!(left1 - left0, VIRTUAL_WIDTH);
+    }
+
+    #[test]
+    fn tutorial_never_shows_the_left_edge_seam() {
+        // Over the whole camera range of the tutorial, the visible plate
+        // window [local, local + 480] stays strictly inside (0, 960): the
+        // only seam that can appear is the unobtrusive one at 480.
+        let level = game_core::tutorial_level();
+        let b = crate::view::camera_bounds(&level);
+        let lo = leftmost_camera_x(&level);
+        let hi = b.right() - VIRTUAL_WIDTH * 0.5;
+        assert!(hi > lo);
+        let mut x = lo;
+        while x <= hi {
+            let local = forest_local(x, lo);
+            assert!(
+                local > 0.0 && local + VIRTUAL_WIDTH < 2.0 * VIRTUAL_WIDTH,
+                "x {x}"
+            );
+            x += 0.5;
+        }
     }
 }
