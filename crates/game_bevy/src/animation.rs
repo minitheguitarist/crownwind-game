@@ -17,6 +17,12 @@ pub enum AnimState {
     Run,
     Jump,
     Fall,
+    /// Near the top of a jump (slow vertical speed). Only used when the
+    /// manifest has an `air` clip.
+    Air,
+    /// Knees absorbing a landing, then settling to idle. Only used when the
+    /// manifest has a `landing` clip.
+    Land,
 }
 
 impl AnimState {
@@ -26,7 +32,52 @@ impl AnimState {
             AnimState::Run => "run",
             AnimState::Jump => "jump",
             AnimState::Fall => "fall",
+            AnimState::Air => "air",
+            AnimState::Land => "landing",
         }
+    }
+
+    /// The basic state this one refines (for hysteresis in [`choose_state`]).
+    fn base(self) -> AnimState {
+        match self {
+            AnimState::Air => AnimState::Fall,
+            AnimState::Land => AnimState::Idle,
+            s => s,
+        }
+    }
+}
+
+/// Vertical speed (units/s) under which an airborne prince shows the apex pose.
+const APEX_SPEED: f32 = 70.0;
+
+/// Refine the basic state with the optional `air` (apex) and `landing`
+/// clips. `prev_time` is how long `prev` has been playing; `land_secs` is the
+/// landing clip's length (0 disables landing). Running always wins over the
+/// landing pose so the prince never stalls when the player keeps moving.
+pub fn refine_state(
+    base: AnimState,
+    prev: AnimState,
+    prev_time: f32,
+    velocity_y: f32,
+    has_air: bool,
+    land_secs: f32,
+) -> AnimState {
+    match base {
+        AnimState::Jump | AnimState::Fall if has_air && velocity_y.abs() < APEX_SPEED => {
+            // Enter the apex only from the rising pose (or stay in it), so a
+            // short hop off a ledge does not flash the apex.
+            if matches!(prev, AnimState::Jump | AnimState::Air) {
+                AnimState::Air
+            } else {
+                base
+            }
+        }
+        AnimState::Idle if land_secs > 0.0 => match prev {
+            AnimState::Jump | AnimState::Air | AnimState::Fall => AnimState::Land,
+            AnimState::Land if prev_time < land_secs => AnimState::Land,
+            _ => AnimState::Idle,
+        },
+        _ => base,
     }
 }
 
@@ -105,11 +156,15 @@ pub fn clip_frame(clip: &Clip, time: f32) -> usize {
 /// simulation's feet point. The pivot `y` is the sole pixel row (verified in
 /// the atlas: grounded frames' lowest opaque row is 44), so that row sits
 /// directly on the ground line instead of one pixel inside it.
+///
+/// M2+ manifests already name the contact line (the first empty row below
+/// the sole), so they need no +1 (see `AnimationManifest::pivot_is_contact_line`).
 pub fn sprite_offset(m: &AnimationManifest) -> Vec2 {
     let (px, py) = m.pivot;
+    let sole_fix = if m.pivot_is_contact_line() { 0.0 } else { 1.0 };
     Vec2::new(
         m.frame_width as f32 * 0.5 - px,
-        py + 1.0 - m.frame_height as f32 * 0.5,
+        py + sole_fix - m.frame_height as f32 * 0.5,
     )
 }
 
@@ -182,7 +237,19 @@ pub fn animate_prince(
     let offset = sprite_offset_units(m);
     for (mut sprite, mut t, mut prince) in &mut q {
         let grounded = standing(p, &sim.0.level, &sim.0.config);
-        let next = choose_state(prince.animator.state, p, grounded);
+        let prev = prince.animator.state;
+        let base = choose_state(prev.base(), p, grounded);
+        let land_secs = m
+            .clip("landing")
+            .map_or(0.0, |c| c.frames.len() as f32 / c.fps);
+        let next = refine_state(
+            base,
+            prev,
+            prince.animator.time,
+            p.velocity.y,
+            m.clip("air").is_some(),
+            land_secs,
+        );
         let rate = playback_rate(next, p.velocity.x, sim.0.config.max_run_speed);
         prince.animator.update(next, dt * rate);
         let index = prince.animator.frame(m);
@@ -198,6 +265,41 @@ pub fn animate_prince(
         // Mirror the pivot offset with the sprite.
         t.translation.x = if flip { -offset.x } else { offset.x };
         t.translation.y = offset.y;
+    }
+}
+
+/// The princess waiting at the goal: plays her idle clip on loop.
+#[derive(Component, Default)]
+pub struct PrincessSprite {
+    pub time: f32,
+}
+
+/// Princess manifest as a resource (embedded, validated at startup).
+#[derive(Resource)]
+pub struct PrincessManifest(pub AnimationManifest);
+
+pub fn animate_princess(
+    time: Res<Time>,
+    sim: Res<GameSim>,
+    manifest: Res<PrincessManifest>,
+    mut q: Query<(&mut Sprite, &mut PrincessSprite)>,
+) {
+    let Some(clip) = manifest.0.clip("idle") else {
+        return;
+    };
+    let dt = if sim.0.is_paused() {
+        0.0
+    } else {
+        time.delta_secs()
+    };
+    for (mut sprite, mut princess) in &mut q {
+        princess.time += dt;
+        let index = clip_frame(clip, princess.time);
+        if let Some(atlas) = sprite.texture_atlas.as_mut()
+            && atlas.index != index
+        {
+            atlas.index = index;
+        }
     }
 }
 
@@ -354,12 +456,12 @@ mod tests {
         let legacy = AnimationManifest::prince();
         assert_eq!(frame_size_units(&legacy), Vec2::new(32.0, 48.0));
         assert_eq!(sprite_offset_units(&legacy), Vec2::new(0.0, 21.0));
-        // A hypothetical 64×96 frame with the same proportions (pivot
-        // (32, 89) = sole row 89) lands on exactly the same cell and feet.
+        // A 64×96 frame with the same proportions (contact-line pivot
+        // (32, 90) = sole row 89) lands on exactly the same cell and feet.
         let mut m2 = legacy.clone();
         m2.frame_width = 64;
         m2.frame_height = 96;
-        m2.pivot = (32.0, 89.0);
+        m2.pivot = (32.0, 90.0);
         assert_eq!(frame_size_units(&m2), Vec2::new(32.0, 48.0));
         // Bottom of the sole row (90 texels from the top) on the feet line.
         let o = sprite_offset_units(&m2);
@@ -392,5 +494,84 @@ mod tests {
         assert_eq!(m.frame_width % 2, 0);
         assert_eq!(m.frame_height % 2, 0);
         assert_eq!(o.fract(), Vec2::ZERO);
+    }
+
+    #[test]
+    fn apex_shows_only_after_rising() {
+        // Rising fast: jump. Slowing near the top: apex. Falling fast: fall.
+        assert_eq!(
+            refine_state(AnimState::Jump, AnimState::Jump, 0.2, 300.0, true, 0.3),
+            AnimState::Jump
+        );
+        assert_eq!(
+            refine_state(AnimState::Jump, AnimState::Jump, 0.2, 40.0, true, 0.3),
+            AnimState::Air
+        );
+        assert_eq!(
+            refine_state(AnimState::Fall, AnimState::Air, 0.1, -40.0, true, 0.3),
+            AnimState::Air
+        );
+        assert_eq!(
+            refine_state(AnimState::Fall, AnimState::Air, 0.1, -200.0, true, 0.3),
+            AnimState::Fall
+        );
+        // Walking off a ledge never flashes the apex.
+        assert_eq!(
+            refine_state(AnimState::Fall, AnimState::Run, 0.1, -10.0, true, 0.3),
+            AnimState::Fall
+        );
+        // No `air` clip: unchanged.
+        assert_eq!(
+            refine_state(AnimState::Jump, AnimState::Jump, 0.2, 40.0, false, 0.3),
+            AnimState::Jump
+        );
+    }
+
+    #[test]
+    fn landing_plays_once_then_idles_and_running_cancels_it() {
+        assert_eq!(
+            refine_state(AnimState::Idle, AnimState::Fall, 0.5, 0.0, true, 0.3),
+            AnimState::Land
+        );
+        assert_eq!(
+            refine_state(AnimState::Idle, AnimState::Land, 0.1, 0.0, true, 0.3),
+            AnimState::Land
+        );
+        assert_eq!(
+            refine_state(AnimState::Idle, AnimState::Land, 0.31, 0.0, true, 0.3),
+            AnimState::Idle
+        );
+        assert_eq!(
+            refine_state(AnimState::Run, AnimState::Fall, 0.5, 0.0, true, 0.3),
+            AnimState::Run
+        );
+        assert_eq!(
+            refine_state(AnimState::Run, AnimState::Land, 0.1, 0.0, true, 0.3),
+            AnimState::Run
+        );
+        // No landing clip: straight to idle.
+        assert_eq!(
+            refine_state(AnimState::Idle, AnimState::Fall, 0.5, 0.0, true, 0.0),
+            AnimState::Idle
+        );
+    }
+
+    #[test]
+    fn m3_hero_contact_line_pivot_puts_sole_on_feet() {
+        let m = AnimationManifest::hero();
+        // 96x96 frame, contact line 88: center sits 40 texels (20 units) above the feet.
+        assert_eq!(sprite_offset(&m), Vec2::new(0.0, 40.0));
+        assert_eq!(sprite_offset_units(&m), Vec2::new(0.0, 20.0));
+        assert_eq!(frame_size_units(&m), Vec2::new(48.0, 48.0));
+        for s in [
+            AnimState::Idle,
+            AnimState::Run,
+            AnimState::Jump,
+            AnimState::Fall,
+            AnimState::Air,
+            AnimState::Land,
+        ] {
+            assert!(m.clip(s.clip_name()).is_some(), "hero lacks {:?}", s);
+        }
     }
 }

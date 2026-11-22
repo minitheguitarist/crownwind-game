@@ -61,7 +61,10 @@ impl Plugin for GamePlugin {
             .init_resource::<ArtHandles>()
             .init_resource::<ArtReady>()
             .insert_resource(animation::PrinceManifest(
-                manifest::AnimationManifest::prince(),
+                manifest::AnimationManifest::hero(),
+            ))
+            .insert_resource(animation::PrincessManifest(
+                manifest::AnimationManifest::princess(),
             ))
             .insert_resource(GameSim(gc::Simulation::new(
                 level,
@@ -90,6 +93,7 @@ impl Plugin for GamePlugin {
                     view::follow_camera,
                     world::sync_player,
                     animation::animate_prince,
+                    animation::animate_princess,
                     world::sync_checkpoints,
                     effects::wall_slide_dust,
                     effects::animate_effects,

@@ -8,8 +8,11 @@
 use bevy::prelude::*;
 use game_core as gc;
 
-use crate::animation::{PrinceManifest, PrinceSprite};
-use crate::manifest::{PRINCE_ATLAS_COLUMNS, PRINCE_ATLAS_PATH};
+use crate::animation::{PrinceManifest, PrinceSprite, PrincessSprite};
+use crate::manifest::{
+    AnimationManifest, HERO_ATLAS_COLUMNS, HERO_ATLAS_PATH, PRINCESS_ATLAS_COLUMNS,
+    PRINCESS_ATLAS_PATH,
+};
 use crate::tiles::{self, Layer, TILE, TILE_COLUMNS, TILES_PATH};
 use crate::{ArtHandles, GameSim};
 
@@ -21,12 +24,11 @@ const POLE_COLOR: Color = Color::srgb_u8(0x29, 0x23, 0x34);
 const POLE_CAP: Color = Color::srgb_u8(0xD8, 0xAC, 0x66);
 pub const FLAG_IDLE: Color = Color::srgb_u8(0x68, 0x86, 0x9B);
 pub const FLAG_ACTIVE: Color = Color::srgb_u8(0xD8, 0xAC, 0x66);
-const DOOR_FRAME: Color = Color::srgb_u8(0xD8, 0xAC, 0x66);
-const DOOR_SHADOW: Color = Color::srgb_u8(0x29, 0x23, 0x34);
-const DOOR_GLOW: Color = Color::srgb_u8(0xA4, 0xC9, 0xD2);
-const DOOR_LIGHT: Color = Color::srgb_u8(0xF6, 0xE8, 0xCF);
 
-const Z_GOAL: f32 = -1.0;
+/// The princess stands just behind the prince's layer.
+const Z_PRINCESS: f32 = 1.5;
+/// How far past the goal trigger's centre the princess stands (units).
+const PRINCESS_GOAL_OFFSET_X: f32 = 14.0;
 const Z_TERRAIN: f32 = 0.0;
 const Z_ROOT: f32 = 0.1;
 const Z_PLANT: f32 = 0.2;
@@ -133,33 +135,56 @@ pub fn spawn_level(
         ));
     }
 
-    // --- Exit door (placeholder, same footprint as the goal trigger) --------
+    // --- Princess at the goal -------------------------------------------------
+    // The finish is the princess herself: she stands on the goal's floor
+    // line just past the trigger (so the arriving prince stops beside her
+    // rather than inside her), facing back toward him.
     let g = level.goal;
-    rect_sprite(&mut commands, g.inset(-2.0), DOOR_FRAME, Z_GOAL);
-    rect_sprite(&mut commands, g, DOOR_SHADOW, Z_GOAL + 0.01);
-    // Pale light spilling through the doorway, brightest at the threshold.
-    rect_sprite(
-        &mut commands,
-        gc::Rect::new(g.x + 6.0, g.y, g.w - 12.0, g.h - 10.0),
-        DOOR_GLOW,
-        Z_GOAL + 0.02,
-    );
-    rect_sprite(
-        &mut commands,
-        gc::Rect::new(g.x + 10.0, g.y, g.w - 20.0, g.h - 18.0),
-        DOOR_LIGHT,
-        Z_GOAL + 0.03,
-    );
+    let pm = AnimationManifest::princess();
+    let princess_image: Handle<Image> = assets.load(PRINCESS_ATLAS_PATH);
+    art.0.push(princess_image.clone().untyped());
+    let princess_layout = layouts.add(TextureAtlasLayout::from_grid(
+        UVec2::new(pm.frame_width, pm.frame_height),
+        PRINCESS_ATLAS_COLUMNS,
+        1,
+        None,
+        None,
+    ));
+    let feet = snap(Vec2::new(g.x + g.w * 0.5 + PRINCESS_GOAL_OFFSET_X, g.y));
+    let offset = crate::animation::sprite_offset_units(&pm);
+    let idle_first = pm.clip("idle").map_or(0, |c| c.frames[0]);
+    commands
+        .spawn((
+            Transform::from_xyz(feet.x, feet.y, Z_PRINCESS),
+            Visibility::default(),
+        ))
+        .with_children(|p| {
+            p.spawn((
+                PrincessSprite::default(),
+                Sprite {
+                    custom_size: Some(crate::animation::frame_size_units(&pm)),
+                    flip_x: true,
+                    ..Sprite::from_atlas_image(
+                        princess_image,
+                        TextureAtlas {
+                            layout: princess_layout,
+                            index: idle_first,
+                        },
+                    )
+                },
+                Transform::from_translation(Vec2::new(-offset.x, offset.y).extend(0.0)),
+            ));
+        });
 
     // --- Prince ----------------------------------------------------------------
     // The root sits at the simulation's feet point; the atlas sprite is a
     // child offset so the manifest pivot lands on it (see `animation`).
     let m = &manifest.0;
-    let prince_image: Handle<Image> = assets.load(PRINCE_ATLAS_PATH);
+    let prince_image: Handle<Image> = assets.load(HERO_ATLAS_PATH);
     art.0.push(prince_image.clone().untyped());
     let prince_layout = layouts.add(TextureAtlasLayout::from_grid(
         UVec2::new(m.frame_width, m.frame_height),
-        PRINCE_ATLAS_COLUMNS,
+        HERO_ATLAS_COLUMNS,
         1,
         None,
         None,

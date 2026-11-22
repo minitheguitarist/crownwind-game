@@ -17,6 +17,19 @@ pub const PRINCE_ATLAS_PATH: &str = "characters/prince_debug.png";
 /// Number of cells packed left to right in the atlas (448 / 32).
 pub const PRINCE_ATLAS_COLUMNS: u32 = 14;
 
+/// M3 playable prince (PixelLab animations, 96×96 frames, contact-line pivot).
+pub const HERO_MANIFEST_JSON: &str = include_str!("../../../content/characters/prince_m3.json");
+pub const HERO_ATLAS_PATH: &str = "characters/prince_m3.png";
+/// 2592 / 96.
+pub const HERO_ATLAS_COLUMNS: u32 = 27;
+
+/// M3 princess, standing at the goal (PixelLab animations, 96×96 frames).
+pub const PRINCESS_MANIFEST_JSON: &str =
+    include_str!("../../../content/characters/princess_m3.json");
+pub const PRINCESS_ATLAS_PATH: &str = "characters/princess_m3.png";
+/// 2496 / 96.
+pub const PRINCESS_ATLAS_COLUMNS: u32 = 26;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Clip {
     pub frames: Vec<usize>,
@@ -139,6 +152,29 @@ impl AnimationManifest {
         m.validate(PRINCE_ATLAS_COLUMNS)
             .expect("prince manifest must match the atlas");
         m
+    }
+
+    /// The embedded M3 playable prince.
+    pub fn hero() -> Self {
+        Self::embedded(HERO_MANIFEST_JSON, HERO_ATLAS_COLUMNS)
+    }
+
+    /// The embedded M3 princess (goal character).
+    pub fn princess() -> Self {
+        Self::embedded(PRINCESS_MANIFEST_JSON, PRINCESS_ATLAS_COLUMNS)
+    }
+
+    fn embedded(json: &str, columns: u32) -> Self {
+        let m = Self::parse(json).expect("character manifest must parse");
+        m.validate(columns)
+            .expect("character manifest must match its atlas");
+        m
+    }
+
+    /// Legacy 48-texel art names the sole row as `pivot.y`; M2+ art names
+    /// the ground contact line (first empty row below the sole).
+    pub fn pivot_is_contact_line(&self) -> bool {
+        self.frame_height != 48
     }
 }
 
@@ -360,6 +396,33 @@ mod tests {
         assert_eq!(m.clip("run").unwrap().frames, vec![4, 5, 6, 7, 8, 9]);
         assert!(m.clip("idle").unwrap().looping);
         assert!(!m.clip("jump").unwrap().looping);
+    }
+
+    #[test]
+    fn m3_hero_and_princess_manifests_match_their_atlases() {
+        let cases: [(AnimationManifest, &[u8], u32); 2] = [
+            (
+                AnimationManifest::hero(),
+                include_bytes!("../../../assets/characters/prince_m3.png"),
+                HERO_ATLAS_COLUMNS,
+            ),
+            (
+                AnimationManifest::princess(),
+                include_bytes!("../../../assets/characters/princess_m3.png"),
+                PRINCESS_ATLAS_COLUMNS,
+            ),
+        ];
+        for (m, png, cols) in cases {
+            assert_eq!((m.frame_width, m.frame_height), (96, 96));
+            assert_eq!(m.pivot, (48.0, 88.0));
+            assert!(m.pivot_is_contact_line());
+            for name in ["idle", "run", "jump", "air", "fall", "landing"] {
+                assert!(m.clip(name).is_some(), "{}: missing {name}", m.character_id);
+            }
+            let w = u32::from_be_bytes(png[16..20].try_into().unwrap());
+            let h = u32::from_be_bytes(png[20..24].try_into().unwrap());
+            assert_eq!((w, h), (m.frame_width * cols, m.frame_height));
+        }
     }
 
     #[test]
