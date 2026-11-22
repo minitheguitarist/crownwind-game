@@ -230,5 +230,5 @@ prenses 23–25 ve 78–80. karelerde. Yüzler ve oranlar bozulmuyor.
   hissi sis bantlarıyla sağlanıyor.
 - MP4 üretilemedi (sistem ffmpeg'inde libx264 yok); önizlemeler GIF.
 - Oyun içinden menüye dönüş yok; görevde istenmiyordu.
-- `ASSET_PROVENANCE.md` güncellenemedi (Codex dosyası, bkz. §3).
+- `ASSET_PROVENANCE.md` satırları beta hazırlığında entegratörün onayıyla eklendi.
 - Değişiklikler commit edilmedi.
