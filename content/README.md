@@ -16,9 +16,17 @@ The Rust checks implement the two frozen v1 contracts explicitly. Integer fields
 fit in an unsigned 64-bit value. Decimal and exponent forms use serde_json's
 floating-point precision. Use integer literals for exact large indices.
 
-The original `prince_debug` placeholder describes planned atlas cells. Indices
-must be unique within each clip and may be shared between clips. Atlas artwork
-is pending. The original `wind_steps` placeholder uses tile coordinates with
+The `prince_debug` prototype has 14 cells. To check its manifest against the
+PNG header geometry and available frame indices, run:
+
+```sh
+cargo run --offline --locked -p asset_pipeline -- animation content/characters/prince_debug.json assets/characters/prince_debug.png
+```
+
+Indices must be unique within each clip and may be shared between clips.
+See `assets/ART_SPEC.md` for pixel coordinates and reproducible image checks.
+
+The original `wind_steps` placeholder uses tile coordinates with
 an upper-left origin and increasing y downward. Each solid includes its starting
 tile and excludes its ending coordinates (x+w, y+h). Every solid and the spawn
 tile must fit within the level, and the spawn tile must be clear.

@@ -15,6 +15,11 @@ fn shipped_manifests_pass_both_entry_points() {
         &[][..],
         &["animation", "content/characters/prince_debug.json"],
         &["level", "content/levels/wind_steps.json"],
+        &[
+            "animation",
+            "content/characters/prince_debug.json",
+            "assets/characters/prince_debug.png",
+        ],
     ] {
         let result = run(args);
         assert!(
@@ -45,4 +50,16 @@ fn invalid_input_reports_filename_and_issue() {
 fn usage_exit_codes() {
     assert!(run(&["--help"]).status.success());
     assert_eq!(run(&["animation"]).status.code(), Some(2));
+}
+
+#[test]
+fn rejects_non_png_atlas_with_path() {
+    let path = "content/characters/prince_debug.json";
+    let result = run(&["animation", path, path]);
+    assert_eq!(result.status.code(), Some(1));
+    let issue = String::from_utf8(result.stderr).unwrap();
+    assert!(
+        issue.contains(path) && issue.contains("invalid PNG"),
+        "{issue}"
+    );
 }

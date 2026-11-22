@@ -6,6 +6,7 @@ use serde_json::{Map, Value};
 #[derive(Clone, Copy)]
 pub enum Kind {
     Animation,
+    Atlas((u32, u32)),
     Level,
 }
 
@@ -59,7 +60,7 @@ fn header(obj: &Object, id_field: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn character(value: &Value) -> Result<(), String> {
+fn character(value: &Value, atlas: Option<(u32, u32)>) -> Result<(), String> {
     let obj = object(
         value,
         "manifest",
@@ -73,9 +74,19 @@ fn character(value: &Value) -> Result<(), String> {
         &["pivot"],
     )?;
     header(obj, "character_id")?;
-    for dim in ["frame_width", "frame_height"] {
-        integer(&obj[dim], dim, 1)?;
-    }
+    let w = integer(&obj["frame_width"], "frame_width", 1)?;
+    let h = integer(&obj["frame_height"], "frame_height", 1)?;
+    let capacity = if let Some((width, height)) = atlas {
+        let (width, height) = (u64::from(width), u64::from(height));
+        if width % w != 0 || height % h != 0 {
+            return Err(format!(
+                "PNG {width}×{height} cannot be divided into {w}×{h} frames"
+            ));
+        }
+        Some((width / w) * (height / h))
+    } else {
+        None
+    };
     if let Some(pivot) = obj.get("pivot") {
         let pivot = object(pivot, "pivot", &["x", "y"], &[])?;
         for axis in ["x", "y"] {
@@ -107,6 +118,13 @@ fn character(value: &Value) -> Result<(), String> {
         let mut seen = HashSet::new();
         for (i, frame) in frames.iter().enumerate() {
             let index = integer(frame, &format!("{path}.frames[{i}]"), 0)?;
+            if let Some(count) = capacity
+                && index >= count
+            {
+                return Err(format!(
+                    "{path}.frames[{i}]: index {index} outside {count}-cell atlas"
+                ));
+            }
             if !seen.insert(index) {
                 return Err(format!("{path}.frames[{i}] repeats index {index}"));
             }
@@ -169,7 +187,8 @@ pub fn validate(kind: Kind, data: &[u8]) -> Result<(), String> {
     let value = Value::deserialize(&mut input).map_err(|e| e.to_string())?;
     input.end().map_err(|e| e.to_string())?;
     match kind {
-        Kind::Animation => character(&value),
+        Kind::Animation => character(&value, None),
+        Kind::Atlas(size) => character(&value, Some(size)),
         Kind::Level => level(&value),
     }
 }
@@ -194,7 +213,32 @@ mod tests {
         let mut a = animation();
         a["pivot"] = json!({"x":-1.25,"y":12});
         a["animations"]["jump"] = json!({"frames":[1.0],"fps":0.5,"loop":false});
-        assert_eq!(character(&a), Ok(()));
+        assert_eq!(character(&a, None), Ok(()));
+    }
+
+    #[test]
+    fn atlas_requires_whole_cells_on_both_axes() {
+        let a = animation();
+        for size in [(65, 48), (64, 47), (16, 48)] {
+            assert!(
+                character(&a, Some(size))
+                    .unwrap_err()
+                    .contains("cannot be divided")
+            );
+        }
+    }
+
+    #[test]
+    fn atlas_indices_fit_the_entire_grid() {
+        let mut a = animation();
+        a["animations"]["idle"]["frames"] = json!([0, 3]);
+        assert_eq!(character(&a, Some((64, 96))), Ok(()));
+        a["animations"]["idle"]["frames"] = json!([4]);
+        assert!(
+            character(&a, Some((64, 96)))
+                .unwrap_err()
+                .contains("index 4")
+        );
     }
 
     #[test]
@@ -204,7 +248,7 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .remove("frames");
-        assert!(character(&a).unwrap_err().contains("frames"));
+        assert!(character(&a, None).unwrap_err().contains("frames"));
         for frames in [
             json!([]),
             json!([2, 1, 2]),
@@ -213,7 +257,7 @@ mod tests {
             json!(0),
         ] {
             a["animations"]["idle"]["frames"] = frames;
-            assert!(character(&a).unwrap_err().contains("frames"));
+            assert!(character(&a, None).unwrap_err().contains("frames"));
         }
     }
 
@@ -222,10 +266,10 @@ mod tests {
         let mut a = animation();
         for fps in [json!(0), json!(-1), json!(60.01), json!("12")] {
             a["animations"]["idle"]["fps"] = fps;
-            assert!(character(&a).unwrap_err().contains(".fps"));
+            assert!(character(&a, None).unwrap_err().contains(".fps"));
         }
         a["animations"]["idle"]["fps"] = json!(60);
-        assert_eq!(character(&a), Ok(()));
+        assert_eq!(character(&a, None), Ok(()));
     }
 
     #[test]
@@ -240,7 +284,7 @@ mod tests {
         ] {
             let mut a = animation();
             *a.pointer_mut(path).unwrap() = bad;
-            assert!(character(&a).is_err(), "{path}");
+            assert!(character(&a, None).is_err(), "{path}");
         }
         for pivot in [
             json!(null),
@@ -250,7 +294,7 @@ mod tests {
         ] {
             let mut a = animation();
             a["pivot"] = pivot;
-            assert!(character(&a).unwrap_err().contains("pivot"));
+            assert!(character(&a, None).unwrap_err().contains("pivot"));
         }
     }
 
