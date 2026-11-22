@@ -13,11 +13,11 @@ pub mod level;
 pub mod movement;
 pub mod simulation;
 
-pub use camera::CameraFollow;
+pub use camera::{CameraFollow, CameraTarget};
 pub use geometry::{Rect, Vec2};
-pub use level::{Level, TILE_SIZE, test_course};
+pub use level::{Checkpoint, Level, TILE_SIZE, test_course};
 pub use movement::{FIXED_DT, MovementConfig, PlayerInput, PlayerState, step};
-pub use simulation::Simulation;
+pub use simulation::{DeathCause, GameEvent, Phase, Simulation};
 
 #[cfg(test)]
 mod tests {

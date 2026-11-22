@@ -64,6 +64,19 @@ impl Rect {
         Vec2::new(self.x + self.w * 0.5, self.y + self.h * 0.5)
     }
 
+    /// Rectangle shrunk by `m` on every side (grown if `m` is negative).
+    /// Never produces negative sizes.
+    pub fn inset(&self, m: f32) -> Rect {
+        let mx = m.min(self.w * 0.5);
+        let my = m.min(self.h * 0.5);
+        Rect::new(
+            self.x + mx,
+            self.y + my,
+            self.w - 2.0 * mx,
+            self.h - 2.0 * my,
+        )
+    }
+
     /// Strict overlap: rectangles that merely touch along an edge do **not**
     /// overlap. This keeps a player resting exactly on a floor stable.
     pub fn overlaps(&self, other: &Rect) -> bool {
@@ -86,6 +99,13 @@ mod tests {
         assert!(!a.overlaps(&b));
         assert!(!a.overlaps(&c));
         assert!(a.overlaps(&Rect::new(9.5, 9.5, 2.0, 2.0)));
+    }
+
+    #[test]
+    fn inset_shrinks_and_clamps() {
+        let r = Rect::new(0.0, 0.0, 16.0, 8.0);
+        assert_eq!(r.inset(2.0), Rect::new(2.0, 2.0, 12.0, 4.0));
+        assert_eq!(r.inset(10.0), Rect::new(8.0, 4.0, 0.0, 0.0));
     }
 
     #[test]
