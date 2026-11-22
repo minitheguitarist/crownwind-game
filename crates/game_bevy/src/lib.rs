@@ -9,6 +9,7 @@
 //!
 //! All visuals are temporary geometric placeholders (no external art).
 
+mod debug;
 mod effects;
 mod hud;
 mod view;
@@ -26,10 +27,12 @@ pub struct GamePlugin;
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(ClearColor(world::BACKGROUND))
+            .insert_resource(AutoPause(true))
             .insert_resource(GameSim(gc::Simulation::new(
                 gc::tutorial_level(),
                 gc::MovementConfig::default(),
             )))
+            .add_plugins(debug::DebugPlugin)
             .add_systems(
                 Startup,
                 (world::spawn_level, view::spawn_camera, hud::spawn_hud),
@@ -38,6 +41,7 @@ impl Plugin for GamePlugin {
                 Update,
                 (
                     control_keys,
+                    pause_on_focus_loss,
                     simulate,
                     effects::process_events,
                     world::sync_player,
@@ -80,7 +84,39 @@ fn control_keys(keys: Res<ButtonInput<KeyCode>>, mut sim: ResMut<GameSim>) {
     }
 }
 
-fn simulate(keys: Res<ButtonInput<KeyCode>>, time: Res<Time>, mut sim: ResMut<GameSim>) {
+/// Whether losing window focus pauses the game (off in automated runs).
+#[derive(Resource)]
+pub struct AutoPause(pub bool);
+
+/// Pause automatically when the window loses focus (alt-tab etc.).
+fn pause_on_focus_loss(
+    windows: Query<&Window, With<bevy::window::PrimaryWindow>>,
+    enabled: Res<AutoPause>,
+    mut was_focused: Local<bool>,
+    mut sim: ResMut<GameSim>,
+) {
+    let Ok(window) = windows.single() else {
+        return;
+    };
+    if !enabled.0 {
+        return;
+    }
+    if *was_focused && !window.focused && sim.0.phase == gc::Phase::Playing {
+        sim.0.set_paused(true);
+    }
+    *was_focused = window.focused;
+}
+
+fn simulate(
+    keys: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
+    mut sim: ResMut<GameSim>,
+    autoplay: Option<ResMut<debug::Autoplay>>,
+) {
+    if let Some(mut auto) = autoplay {
+        debug::run_autoplay(&time, &mut auto, &mut sim.0);
+        return;
+    }
     let input = read_input(&keys);
     sim.0.advance(time.delta_secs(), input);
 }

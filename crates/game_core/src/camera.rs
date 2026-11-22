@@ -1,8 +1,9 @@
 //! Frame-rate independent camera follow math (pure Rust, no engine types).
 //!
 //! Behaviour:
-//! - Horizontal: dead zone around a point slightly *ahead* of the player in
-//!   the facing direction, so more of the upcoming course is visible.
+//! - Horizontal: dead zone around a point slightly *ahead* of the player.
+//!   The look-ahead only changes while running on the ground, so rapid
+//!   facing flips in the air (wall jumps in a chimney) do not swing the view.
 //! - Vertical: while grounded the camera settles on the ground height
 //!   ("platform snap"). While airborne it ignores normal jump arcs and only
 //!   follows when the player leaves a taller zone (big falls, wall climbs).
@@ -32,6 +33,8 @@ pub struct CameraFollow {
     pub smoothing_y: f32,
     /// The camera centers this far above the player's feet.
     pub height_offset: f32,
+    /// Speed (px/s) at which the look-ahead offset may change.
+    pub look_ahead_speed: f32,
 }
 
 impl Default for CameraFollow {
@@ -47,6 +50,7 @@ impl Default for CameraFollow {
             smoothing_x: 5.0,
             smoothing_y: 4.0,
             height_offset: 40.0,
+            look_ahead_speed: 60.0,
         }
     }
 }
@@ -57,8 +61,8 @@ pub struct CameraTarget {
     /// Player feet position.
     pub feet: Vec2,
     pub grounded: bool,
-    /// -1 or 1.
-    pub facing: f32,
+    /// Horizontal look-ahead offset (see [`CameraFollow::next_look_offset`]).
+    pub look_offset: f32,
 }
 
 fn follow_axis(cur: f32, tgt: f32, below: f32, above: f32) -> f32 {
@@ -74,7 +78,7 @@ fn follow_axis(cur: f32, tgt: f32, below: f32, above: f32) -> f32 {
 impl CameraFollow {
     /// Where the camera wants to be given its current center and the target.
     pub fn desired(&self, current: Vec2, target: CameraTarget) -> Vec2 {
-        let tx = target.feet.x + target.facing.signum() * self.look_ahead;
+        let tx = target.feet.x + target.look_offset;
         let ty = target.feet.y + self.height_offset;
         let x = follow_axis(current.x, tx, self.dead_zone_x, self.dead_zone_x);
         let y = if target.grounded {
@@ -123,10 +127,28 @@ impl CameraFollow {
         )
     }
 
+    /// Advance the look-ahead offset. It moves toward `facing * look_ahead`
+    /// only while the player runs on the ground; otherwise it holds.
+    pub fn next_look_offset(
+        &self,
+        current: f32,
+        grounded: bool,
+        velocity_x: f32,
+        facing: f32,
+        dt: f32,
+    ) -> f32 {
+        if !grounded || velocity_x.abs() < 20.0 {
+            return current;
+        }
+        let goal = facing.signum() * self.look_ahead;
+        let max = self.look_ahead_speed * dt.max(0.0);
+        current + (goal - current).clamp(-max, max)
+    }
+
     /// Immediate placement (used at spawn / respawn).
     pub fn snap(&self, target: CameraTarget, bounds: Rect) -> Vec2 {
         let t = Vec2::new(
-            target.feet.x + target.facing.signum() * self.look_ahead,
+            target.feet.x + target.look_offset,
             target.feet.y + self.height_offset,
         );
         self.clamp(t, bounds)
@@ -145,7 +167,7 @@ mod tests {
         CameraTarget {
             feet: Vec2::new(x, y),
             grounded: true,
-            facing: 1.0,
+            look_offset: 32.0,
         }
     }
 
@@ -217,17 +239,43 @@ mod tests {
     }
 
     #[test]
-    fn look_ahead_follows_facing() {
+    fn look_offset_shifts_view() {
         let cam = CameraFollow::default();
         let r = cam.snap(on_ground(0.0, 0.0), big_bounds());
         let l = cam.snap(
             CameraTarget {
-                facing: -1.0,
+                look_offset: -32.0,
                 ..on_ground(0.0, 0.0)
             },
             big_bounds(),
         );
-        assert_eq!(r.x - l.x, 2.0 * cam.look_ahead);
+        assert_eq!(r.x - l.x, 64.0);
+    }
+
+    #[test]
+    fn look_offset_turns_gradually_when_running() {
+        let cam = CameraFollow::default();
+        let mut look = cam.look_ahead;
+        for _ in 0..30 {
+            look = cam.next_look_offset(look, true, -130.0, -1.0, 1.0 / 60.0);
+        }
+        // Half a second at 60 px/s: moved 30 px, not the full 64.
+        assert!((look - (cam.look_ahead - 30.0)).abs() < 1e-3, "{look}");
+        for _ in 0..120 {
+            look = cam.next_look_offset(look, true, -130.0, -1.0, 1.0 / 60.0);
+        }
+        assert_eq!(look, -cam.look_ahead);
+    }
+
+    #[test]
+    fn look_offset_holds_in_air_and_when_standing() {
+        let cam = CameraFollow::default();
+        let look = 12.0;
+        // Wall-jump style facing flips in the air: no change.
+        assert_eq!(cam.next_look_offset(look, false, -170.0, -1.0, 0.1), look);
+        assert_eq!(cam.next_look_offset(look, false, 170.0, 1.0, 0.1), look);
+        // Turning around on the spot: no change until actually running.
+        assert_eq!(cam.next_look_offset(look, true, 0.0, -1.0, 0.1), look);
     }
 
     #[test]

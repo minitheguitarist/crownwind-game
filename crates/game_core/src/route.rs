@@ -219,6 +219,26 @@ pub fn find_route(
     None
 }
 
+/// Plan a complete run: every checkpoint in order, then the goal.
+/// Returns the per-step inputs from the level spawn, or `None` if some
+/// segment was not found within `max_nodes_per_segment`.
+pub fn plan_level_route(
+    level: &Level,
+    cfg: &MovementConfig,
+    max_nodes_per_segment: usize,
+) -> Option<Vec<PlayerInput>> {
+    let mut targets: Vec<Rect> = level.checkpoints.iter().map(|c| c.area).collect();
+    targets.push(level.goal);
+    let mut state = PlayerState::at(level.spawn);
+    let mut inputs = Vec::new();
+    for target in targets {
+        let route = find_route(level, cfg, state, target, max_nodes_per_segment)?;
+        inputs.extend(route.inputs);
+        state = route.end;
+    }
+    Some(inputs)
+}
+
 fn reconstruct(
     nodes: &[Node],
     last: usize,

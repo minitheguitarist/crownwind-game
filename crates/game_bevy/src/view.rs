@@ -23,6 +23,8 @@ pub struct FollowCam {
     pub seen_teleports: u32,
     /// Current integer pixel scale (screen pixels per world pixel).
     pub scale: u32,
+    /// Smoothed horizontal look-ahead.
+    pub look_offset: f32,
 }
 
 /// Largest whole-number scale at which the 480×270 view fits the window.
@@ -38,11 +40,11 @@ pub fn camera_bounds(level: &gc::Level) -> gc::Rect {
     gc::Rect::new(b.x, b.y - 48.0, b.w, b.h + 48.0 + 64.0)
 }
 
-fn camera_target(sim: &gc::Simulation) -> gc::CameraTarget {
+fn camera_target(sim: &gc::Simulation, look_offset: f32) -> gc::CameraTarget {
     gc::CameraTarget {
         feet: sim.interpolated_position(),
         grounded: sim.player.grounded,
-        facing: f32::from(sim.player.facing),
+        look_offset,
     }
 }
 
@@ -52,13 +54,18 @@ pub fn spawn_camera(mut commands: Commands, sim: Res<GameSim>) {
         view_height: VIRTUAL_HEIGHT,
         ..default()
     };
-    let center = rules.snap(camera_target(&sim.0), camera_bounds(&sim.0.level));
+    let look_offset = f32::from(sim.0.player.facing) * rules.look_ahead;
+    let center = rules.snap(
+        camera_target(&sim.0, look_offset),
+        camera_bounds(&sim.0.level),
+    );
     let c = snap(Vec2::new(center.x, center.y));
     commands.insert_resource(FollowCam {
         rules,
         center,
         seen_teleports: sim.0.teleports,
         scale: 2,
+        look_offset,
     });
     commands.spawn((
         Camera2d,
@@ -116,15 +123,30 @@ pub fn follow_camera(
     mut camera: Query<&mut Transform, With<MainCamera>>,
 ) {
     let bounds = camera_bounds(&sim.0.level);
-    let target = camera_target(&sim.0);
     let rules = cam.rules;
+    let dt = if sim.0.is_paused() {
+        0.0
+    } else {
+        time.delta_secs()
+    };
+    let p = &sim.0.player;
+    if cam.seen_teleports != sim.0.teleports {
+        cam.look_offset = f32::from(p.facing) * rules.look_ahead;
+    } else {
+        cam.look_offset = rules.next_look_offset(
+            cam.look_offset,
+            p.grounded,
+            p.velocity.x,
+            f32::from(p.facing),
+            dt,
+        );
+    }
+    let target = camera_target(&sim.0, cam.look_offset);
     cam.center = if cam.seen_teleports != sim.0.teleports {
         cam.seen_teleports = sim.0.teleports;
         rules.snap(target, bounds)
-    } else if sim.0.is_paused() {
-        cam.center
     } else {
-        rules.update(cam.center, target, bounds, time.delta_secs())
+        rules.update(cam.center, target, bounds, dt)
     };
     let c = snap(Vec2::new(cam.center.x, cam.center.y));
     if let Ok(mut t) = camera.single_mut() {

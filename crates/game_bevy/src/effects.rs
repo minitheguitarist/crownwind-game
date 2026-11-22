@@ -30,6 +30,10 @@ pub struct Toast {
     pub remaining: f32,
 }
 
+/// Fastest completion time in this session.
+#[derive(Resource, Default)]
+pub struct BestTime(pub Option<f32>);
+
 /// Full-screen tint that fades out (death flash).
 #[derive(Resource, Default)]
 pub struct ScreenFlash {
@@ -62,7 +66,8 @@ fn burst(
         let a = hash01(seed.wrapping_add(i * 7)) * std::f32::consts::TAU;
         let s = speed * (0.5 + 0.5 * hash01(seed.wrapping_add(i * 13 + 1)));
         let velocity = Vec2::new(a.cos() * s, a.sin() * s + up_bias);
-        let size = if i % 3 == 0 { 3.0 } else { 2.0 };
+        // Even sizes keep particle edges on the pixel grid.
+        let size = if i % 3 == 0 { 4.0 } else { 2.0 };
         let max_life = 0.45 + 0.3 * hash01(seed.wrapping_add(i * 31 + 2));
         let p = snap(at);
         commands.spawn((
@@ -84,6 +89,7 @@ pub fn process_events(
     mut sim: ResMut<GameSim>,
     mut toast: ResMut<Toast>,
     mut flash: ResMut<ScreenFlash>,
+    mut best: ResMut<BestTime>,
 ) {
     let half_h = sim.0.config.player_height * 0.5;
     let seed = sim.0.steps as u32;
@@ -123,6 +129,14 @@ pub fn process_events(
                 toast.remaining = TOAST_DURATION;
             }
             gc::GameEvent::LevelCompleted => {
+                let t = sim.0.elapsed;
+                if best.0.is_none_or(|b| t < b) {
+                    if best.0.is_some() {
+                        toast.text = "New best time!".into();
+                        toast.remaining = TOAST_DURATION * 1.5;
+                    }
+                    best.0 = Some(t);
+                }
                 let g = sim.0.level.goal.center();
                 for k in 0..3 {
                     burst(

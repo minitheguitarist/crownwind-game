@@ -5,13 +5,14 @@ use bevy::prelude::*;
 use game_core as gc;
 
 use crate::GameSim;
-use crate::effects::{FLASH_DURATION, ScreenFlash, Toast};
+use crate::effects::{BestTime, FLASH_DURATION, ScreenFlash, Toast};
 
 const TEXT: Color = Color::srgb(0.92, 0.92, 0.95);
 const DIM: Color = Color::srgba(0.85, 0.87, 0.92, 0.75);
 const ACCENT: Color = Color::srgb(1.0, 0.85, 0.35);
 const GOOD: Color = Color::srgb(0.45, 0.95, 0.55);
 const PANEL: Color = Color::srgba(0.04, 0.05, 0.08, 0.78);
+const STRIP: Color = Color::srgba(0.04, 0.05, 0.08, 0.55);
 
 #[derive(Component)]
 pub struct StatusText;
@@ -39,13 +40,16 @@ fn label(text: impl Into<String>, size: f32, color: Color) -> impl Bundle {
     )
 }
 
+/// Full-screen container that places its panel in the upper part of the
+/// screen, leaving the hero (below the center) visible.
 fn centered_panel() -> Node {
     Node {
         position_type: PositionType::Absolute,
         width: Val::Percent(100.0),
         height: Val::Percent(100.0),
         justify_content: JustifyContent::Center,
-        align_items: AlignItems::Center,
+        align_items: AlignItems::FlexStart,
+        padding: UiRect::top(Val::Percent(16.0)),
         ..default()
     }
 }
@@ -63,6 +67,7 @@ fn panel_box() -> Node {
 pub fn spawn_hud(mut commands: Commands) {
     commands.insert_resource(Toast::default());
     commands.insert_resource(ScreenFlash::default());
+    commands.insert_resource(BestTime::default());
 
     // Death flash (full screen, behind the text).
     commands.spawn((
@@ -82,26 +87,30 @@ pub fn spawn_hud(mut commands: Commands) {
         label("", 16.0, TEXT),
         Node {
             position_type: PositionType::Absolute,
-            left: Val::Px(12.0),
-            top: Val::Px(8.0),
+            left: Val::Px(8.0),
+            top: Val::Px(6.0),
+            padding: UiRect::axes(Val::Px(6.0), Val::Px(3.0)),
             ..default()
         },
+        BackgroundColor(STRIP),
     ));
 
     // Controls hint (bottom-left).
     commands.spawn((
         label(
-            "Move A/D or \u{2190}/\u{2192}   Jump Space (hold = higher)   \
+            "Move A/D or Left/Right   Jump Space (hold = higher)   \
              Wall jump: jump while touching a wall   R restart   Esc pause",
             13.0,
             DIM,
         ),
         Node {
             position_type: PositionType::Absolute,
-            left: Val::Px(12.0),
-            bottom: Val::Px(8.0),
+            left: Val::Px(8.0),
+            bottom: Val::Px(6.0),
+            padding: UiRect::axes(Val::Px(6.0), Val::Px(3.0)),
             ..default()
         },
+        BackgroundColor(STRIP),
     ));
 
     // Toast (upper middle).
@@ -171,6 +180,7 @@ pub fn update_hud(
     sim: Res<GameSim>,
     toast: Res<Toast>,
     flash: Res<ScreenFlash>,
+    best: Res<BestTime>,
     mut status: StatusQ,
     mut toast_text: ToastQ,
     mut victory_text: VictoryTextQ,
@@ -208,11 +218,12 @@ pub fn update_hud(
     }
 
     if let Ok(mut text) = victory_text.single_mut() {
+        let best = best.0.map_or_else(|| "-".to_string(), format_time);
         let line = format!(
-            "Time {}    Deaths {}    Restarts {}",
+            "Time {}    Best {}    Deaths {}",
             format_time(s.elapsed),
-            s.deaths,
-            s.restarts
+            best,
+            s.deaths
         );
         if text.0 != line {
             text.0 = line;

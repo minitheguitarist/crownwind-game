@@ -79,15 +79,7 @@ fn waypoints(level: &Level) -> Vec<Rect> {
 
 /// Find a full route through every waypoint; returns the per-step inputs.
 fn full_route(level: &Level, cfg: &MovementConfig) -> Vec<crate::PlayerInput> {
-    let mut state = PlayerState::at(level.spawn);
-    let mut inputs = Vec::new();
-    for (i, target) in waypoints(level).into_iter().enumerate() {
-        let route = find_route(level, cfg, state, target, MAX_NODES)
-            .unwrap_or_else(|| panic!("no route to waypoint {i} from {:?}", state.position));
-        inputs.extend(route.inputs);
-        state = route.end;
-    }
-    inputs
+    crate::route::plan_level_route(level, cfg, MAX_NODES).expect("no full route found")
 }
 
 #[test]

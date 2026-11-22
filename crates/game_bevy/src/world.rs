@@ -150,7 +150,7 @@ pub fn spawn_level(
             ));
             p.spawn((
                 PlayerFace,
-                Sprite::from_color(HERO_FACE_COLOR, Vec2::new(4.0, 5.0)),
+                Sprite::from_color(HERO_FACE_COLOR, Vec2::new(4.0, 4.0)),
                 Transform::from_xyz(3.0, cfg.player_height - 6.0, 0.1),
             ));
         });

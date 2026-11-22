@@ -137,6 +137,18 @@ impl Simulation {
         self.events.push(GameEvent::LevelRestarted);
     }
 
+    /// Jump straight to checkpoint `index` as if it had just been activated
+    /// (practice / debugging). Out-of-range indices are ignored.
+    pub fn start_at_checkpoint(&mut self, index: usize) {
+        if index >= self.level.checkpoints.len() {
+            return;
+        }
+        self.active_checkpoint = Some(index);
+        self.phase = Phase::Playing;
+        let at = self.level.checkpoints[index].spawn;
+        self.place_player(at);
+    }
+
     /// Drain the events produced since the last call.
     pub fn take_events(&mut self) -> Vec<GameEvent> {
         std::mem::take(&mut self.events)

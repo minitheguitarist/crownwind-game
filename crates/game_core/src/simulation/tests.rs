@@ -400,3 +400,13 @@ fn lifecycle_is_deterministic() {
     };
     assert_eq!(go(), go());
 }
+
+#[test]
+fn start_at_checkpoint_places_player_and_marks_progress() {
+    let mut s = sim();
+    s.start_at_checkpoint(1);
+    assert_eq!(s.active_checkpoint, Some(1));
+    assert_eq!(s.player.position, Vec2::new(268.0, 0.0));
+    s.start_at_checkpoint(99);
+    assert_eq!(s.active_checkpoint, Some(1));
+}
