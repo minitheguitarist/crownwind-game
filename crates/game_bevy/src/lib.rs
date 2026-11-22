@@ -9,9 +9,13 @@
 //!
 //! All visuals are temporary geometric placeholders (no external art).
 
+pub mod animation;
+mod background;
 mod debug;
 mod effects;
 mod hud;
+pub mod manifest;
+mod tiles;
 mod view;
 mod world;
 
@@ -28,6 +32,9 @@ impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(ClearColor(world::BACKGROUND))
             .insert_resource(AutoPause(true))
+            .insert_resource(animation::PrinceManifest(
+                manifest::AnimationManifest::prince(),
+            ))
             .insert_resource(GameSim(gc::Simulation::new(
                 gc::tutorial_level(),
                 gc::MovementConfig::default(),
@@ -35,7 +42,12 @@ impl Plugin for GamePlugin {
             .add_plugins(debug::DebugPlugin)
             .add_systems(
                 Startup,
-                (world::spawn_level, view::spawn_camera, hud::spawn_hud),
+                (
+                    world::spawn_level,
+                    background::spawn_backdrop,
+                    view::spawn_camera,
+                    hud::spawn_hud,
+                ),
             )
             .add_systems(
                 Update,
@@ -45,11 +57,13 @@ impl Plugin for GamePlugin {
                     simulate,
                     effects::process_events,
                     world::sync_player,
+                    animation::animate_prince,
                     world::sync_checkpoints,
                     effects::wall_slide_dust,
                     effects::animate_effects,
                     view::fit_integer_scale,
                     view::follow_camera,
+                    background::follow_backdrop,
                     hud::update_hud,
                 )
                     .chain(),

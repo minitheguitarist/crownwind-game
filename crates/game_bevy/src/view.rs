@@ -1,11 +1,16 @@
-//! Camera: integer-scaled pixel-art view with a smoothed follow.
+//! Camera: a fixed 480×270 world view, integer-scaled and letterboxed, with
+//! a smoothed follow.
 //!
 //! The camera center is simulated smoothly (in `game_core::CameraFollow`),
 //! but the transform is snapped to the 1-world-pixel grid so the level never
 //! shimmers. The player is snapped to the same grid, so the two move in
 //! lockstep pixel increments.
+//!
+//! The view is always exactly 480×270 world pixels (the size of the Windwood
+//! backdrop plates). Extra window space becomes letterbox bars instead of
+//! showing more world, so the plates always cover the whole view.
 
-use bevy::camera::ScalingMode;
+use bevy::camera::{ScalingMode, Viewport};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use game_core as gc;
@@ -27,6 +32,16 @@ pub struct FollowCam {
     pub look_offset: f32,
 }
 
+/// Centered viewport of `scale` × 480×270 inside a window, or `None` when
+/// the window is smaller than one 480×270 view (then the view fills it).
+pub fn letterbox(physical: UVec2, scale: u32) -> Option<(UVec2, UVec2)> {
+    let size = UVec2::new(VIRTUAL_WIDTH as u32 * scale, VIRTUAL_HEIGHT as u32 * scale);
+    if size.x > physical.x || size.y > physical.y {
+        return None;
+    }
+    Some(((physical - size) / 2, size))
+}
+
 /// Largest whole-number scale at which the 480×270 view fits the window.
 pub fn integer_scale(physical: UVec2) -> u32 {
     let sx = physical.x as f32 / VIRTUAL_WIDTH;
@@ -36,8 +51,9 @@ pub fn integer_scale(physical: UVec2) -> u32 {
 
 pub fn camera_bounds(level: &gc::Level) -> gc::Rect {
     let b = level.bounds();
-    // Allow looking a little below the lowest ground and well above the top.
-    gc::Rect::new(b.x, b.y - 48.0, b.w, b.h + 48.0 + 64.0)
+    // Never look below the bottom of the terrain columns (the backdrop would
+    // show under the ground); allow some sky above the tallest walls.
+    gc::Rect::new(b.x, b.y, b.w, b.h + 64.0)
 }
 
 fn camera_target(sim: &gc::Simulation, look_offset: f32) -> gc::CameraTarget {
@@ -81,38 +97,30 @@ pub fn spawn_camera(mut commands: Commands, sim: Res<GameSim>) {
     ));
 }
 
-/// Keep one world pixel = an integer number of screen pixels. A larger
-/// window shows a little more of the world rather than stretching pixels.
+/// Keep one world pixel = an integer number of screen pixels by rendering
+/// into a centered viewport of exactly `n` × 480×270 physical pixels.
 pub fn fit_integer_scale(
     windows: Query<&Window, With<PrimaryWindow>>,
     mut cam: ResMut<FollowCam>,
-    mut projection: Query<&mut Projection, With<MainCamera>>,
+    mut camera: Query<&mut Camera, With<MainCamera>>,
+    mut last: Local<UVec2>,
 ) {
     let Ok(window) = windows.single() else {
         return;
     };
     let physical = window.physical_size();
-    if physical.x == 0 || physical.y == 0 {
+    if physical.x == 0 || physical.y == 0 || physical == *last {
         return;
     }
+    *last = physical;
     let n = integer_scale(physical);
-    // Round the visible area to whole world pixels (even, so the center
-    // stays on the grid).
-    let w = ((physical.x / n) & !1) as f32;
-    let h = ((physical.y / n) & !1) as f32;
-    if cam.scale == n && cam.rules.view_width == w && cam.rules.view_height == h {
-        return;
-    }
     cam.scale = n;
-    cam.rules.view_width = w;
-    cam.rules.view_height = h;
-    if let Ok(mut p) = projection.single_mut()
-        && let Projection::Orthographic(o) = p.as_mut()
-    {
-        o.scaling_mode = ScalingMode::Fixed {
-            width: w,
-            height: h,
-        };
+    if let Ok(mut c) = camera.single_mut() {
+        c.viewport = letterbox(physical, n).map(|(pos, size)| Viewport {
+            physical_position: pos,
+            physical_size: size,
+            ..default()
+        });
     }
 }
 
@@ -165,5 +173,24 @@ mod tests {
         assert_eq!(integer_scale(UVec2::new(1920, 1080)), 4);
         assert_eq!(integer_scale(UVec2::new(1280, 720)), 2);
         assert_eq!(integer_scale(UVec2::new(300, 200)), 1);
+    }
+
+    #[test]
+    fn letterbox_centers_an_exact_multiple() {
+        assert_eq!(
+            letterbox(UVec2::new(960, 540), 2),
+            Some((UVec2::ZERO, UVec2::new(960, 540)))
+        );
+        // 1000×600 window at 2×: 20 px bars left/right, 30 px top/bottom.
+        assert_eq!(
+            letterbox(UVec2::new(1000, 600), 2),
+            Some((UVec2::new(20, 30), UVec2::new(960, 540)))
+        );
+        // Ultra-wide 2560×1080 at 4×: side bars only.
+        assert_eq!(
+            letterbox(UVec2::new(2560, 1080), 4),
+            Some((UVec2::new(320, 0), UVec2::new(1920, 1080)))
+        );
+        assert_eq!(letterbox(UVec2::new(300, 200), 1), None);
     }
 }

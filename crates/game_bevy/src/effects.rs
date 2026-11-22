@@ -9,7 +9,7 @@ use crate::world::snap;
 
 const DEATH_COLOR: Color = Color::srgb(0.95, 0.30, 0.30);
 const RESPAWN_COLOR: Color = Color::srgb(0.85, 0.90, 1.0);
-const CHECKPOINT_COLOR: Color = Color::srgb(0.40, 0.95, 0.50);
+const CHECKPOINT_COLOR: Color = Color::srgb_u8(0xD8, 0xAC, 0x66);
 const GOAL_COLOR: Color = Color::srgb(1.0, 0.85, 0.30);
 const DUST_COLOR: Color = Color::srgb(0.75, 0.75, 0.80);
 
@@ -115,7 +115,7 @@ pub fn process_events(
             }
             gc::GameEvent::CheckpointActivated { index } => {
                 let cp = &sim.0.level.checkpoints[index];
-                let c = Vec2::new(cp.area.x + cp.area.w * 0.5 + 6.0, cp.spawn.y + 29.0);
+                let c = Vec2::new(cp.spawn.x - 21.0, cp.spawn.y + 31.0);
                 burst(
                     &mut commands,
                     c,

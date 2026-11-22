@@ -1,40 +1,41 @@
-//! Level and player placeholder visuals.
+//! Level and player visuals: Windwood tiles, the prince sprite, and
+//! placeholder checkpoint flags / exit door (no art for those yet).
+//!
+//! Draw order (z): sky -100, forest -90, exit door -1, terrain 0,
+//! roots 0.1, plants 0.2, thorns 0.4, checkpoints 0.6, prince 2,
+//! particles 5. Everything is placed on the 1-world-pixel grid.
 
 use bevy::prelude::*;
 use game_core as gc;
 
 use crate::GameSim;
+use crate::animation::{PrinceManifest, PrinceSprite};
+use crate::manifest::{PRINCE_ATLAS_COLUMNS, PRINCE_ATLAS_PATH};
+use crate::tiles::{self, Layer, TILE, TILE_COLUMNS, TILES_PATH};
 
-pub const BACKGROUND: Color = Color::srgb(0.10, 0.12, 0.18);
-const FAR_BACKDROP: Color = Color::srgb(0.13, 0.16, 0.24);
-const SOLID_COLOR: Color = Color::srgb(0.33, 0.38, 0.48);
-const SOLID_EDGE_COLOR: Color = Color::srgb(0.24, 0.28, 0.36);
-const SOLID_TOP_COLOR: Color = Color::srgb(0.52, 0.70, 0.42);
-const SPIKE_COLOR: Color = Color::srgb(0.90, 0.22, 0.25);
-const SPIKE_BASE_COLOR: Color = Color::srgb(0.45, 0.10, 0.14);
-const POLE_COLOR: Color = Color::srgb(0.75, 0.75, 0.80);
-pub const FLAG_IDLE: Color = Color::srgb(0.45, 0.47, 0.55);
-pub const FLAG_ACTIVE: Color = Color::srgb(0.35, 0.90, 0.45);
-const GOAL_FRAME: Color = Color::srgb(0.95, 0.78, 0.25);
-const GOAL_INNER: Color = Color::srgb(0.30, 0.22, 0.08);
-const HERO_COLOR: Color = Color::srgb(0.86, 0.32, 0.30);
-const HERO_CAPE: Color = Color::srgb(0.30, 0.40, 0.85);
-const HERO_FACE_COLOR: Color = Color::srgb(0.98, 0.88, 0.75);
+/// Letterbox bars and anything outside the 480×270 view.
+pub const BACKGROUND: Color = Color::srgb(0.06, 0.05, 0.08);
 
-const Z_BACKDROP: f32 = -5.0;
+// Placeholder props, picked from the Windwood / prince palette.
+const POLE_COLOR: Color = Color::srgb_u8(0x29, 0x23, 0x34);
+const POLE_CAP: Color = Color::srgb_u8(0xD8, 0xAC, 0x66);
+pub const FLAG_IDLE: Color = Color::srgb_u8(0x68, 0x86, 0x9B);
+pub const FLAG_ACTIVE: Color = Color::srgb_u8(0xD8, 0xAC, 0x66);
+const DOOR_FRAME: Color = Color::srgb_u8(0xD8, 0xAC, 0x66);
+const DOOR_SHADOW: Color = Color::srgb_u8(0x29, 0x23, 0x34);
+const DOOR_GLOW: Color = Color::srgb_u8(0xA4, 0xC9, 0xD2);
+const DOOR_LIGHT: Color = Color::srgb_u8(0xF6, 0xE8, 0xCF);
+
 const Z_GOAL: f32 = -1.0;
-const Z_SOLID: f32 = 0.0;
-const Z_DECOR: f32 = 0.5;
+const Z_TERRAIN: f32 = 0.0;
+const Z_ROOT: f32 = 0.1;
+const Z_PLANT: f32 = 0.2;
+const Z_THORNS: f32 = 0.4;
+const Z_CHECKPOINT: f32 = 0.6;
 const Z_PLAYER: f32 = 2.0;
 
 #[derive(Component)]
 pub struct PlayerRoot;
-
-#[derive(Component)]
-pub struct PlayerFace;
-
-#[derive(Component)]
-pub struct PlayerCape;
 
 #[derive(Component)]
 pub struct CheckpointFlag(pub usize);
@@ -55,82 +56,101 @@ fn rect_sprite(commands: &mut Commands, rect: gc::Rect, color: Color, z: f32) {
 pub fn spawn_level(
     mut commands: Commands,
     sim: Res<GameSim>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
+    manifest: Res<PrinceManifest>,
+    assets: Res<AssetServer>,
+    mut layouts: ResMut<Assets<TextureAtlasLayout>>,
 ) {
     let level = &sim.0.level;
-    let cfg = &sim.0.config;
-    let b = level.bounds();
 
-    // A flat backdrop band so the playfield reads as a place.
-    rect_sprite(
-        &mut commands,
-        gc::Rect::new(b.x, b.y, b.w, b.h + 200.0),
-        FAR_BACKDROP,
-        Z_BACKDROP,
-    );
-
-    for solid in &level.solids {
-        rect_sprite(&mut commands, *solid, SOLID_EDGE_COLOR, Z_SOLID);
-        rect_sprite(&mut commands, solid.inset(1.0), SOLID_COLOR, Z_SOLID + 0.05);
-        let lip = gc::Rect::new(solid.x, solid.top() - 3.0, solid.w, 3.0);
-        rect_sprite(&mut commands, lip, SOLID_TOP_COLOR, Z_SOLID + 0.1);
-    }
-
-    // Hazards: a dark base strip with a row of bright triangular spikes.
-    let tooth = meshes.add(Triangle2d::new(
-        Vec2::new(-4.0, 0.0),
-        Vec2::new(4.0, 0.0),
-        Vec2::new(0.0, 1.0),
+    // --- Terrain, plants, thorns from the Windwood atlas --------------------
+    let tiles_image: Handle<Image> = assets.load(TILES_PATH);
+    let tiles_layout = layouts.add(TextureAtlasLayout::from_grid(
+        UVec2::splat(TILE as u32),
+        TILE_COLUMNS,
+        1,
+        None,
+        None,
     ));
-    let spike_mat = materials.add(ColorMaterial::from_color(SPIKE_COLOR));
-    for h in &level.hazards {
-        rect_sprite(
-            &mut commands,
-            gc::Rect::new(h.x, h.y, h.w, 2.0),
-            SPIKE_BASE_COLOR,
-            Z_DECOR,
-        );
-        let teeth = (h.w / 8.0).floor().max(1.0) as i32;
-        let pitch = h.w / teeth as f32;
-        for i in 0..teeth {
-            let x = h.x + pitch * (i as f32 + 0.5);
-            commands.spawn((
-                Mesh2d(tooth.clone()),
-                MeshMaterial2d(spike_mat.clone()),
-                Transform::from_xyz(x, h.y, Z_DECOR - 0.01).with_scale(Vec3::new(
-                    pitch / 8.0,
-                    h.h,
-                    1.0,
-                )),
-            ));
-        }
+    let placements = tiles::terrain(level)
+        .into_iter()
+        .chain(tiles::decorations(level))
+        .chain(tiles::thorns(level));
+    for p in placements {
+        let z = match (p.layer, p.index) {
+            (Layer::Terrain, _) => Z_TERRAIN,
+            (Layer::Decor, tiles::ROOT) => Z_ROOT,
+            (Layer::Decor, _) => Z_PLANT,
+            (Layer::Hazard, _) => Z_THORNS,
+        };
+        commands.spawn((
+            Sprite::from_atlas_image(
+                tiles_image.clone(),
+                TextureAtlas {
+                    layout: tiles_layout.clone(),
+                    index: p.index,
+                },
+            ),
+            // 16 px cell: center = corner + 8 keeps edges on whole pixels.
+            Transform::from_xyz(p.x + TILE * 0.5, p.y + TILE * 0.5, z),
+        ));
     }
 
-    // Checkpoints: pole + flag (flag color shows activation).
+    // --- Checkpoints: pole + pennant (placeholder) ---------------------------
+    // The pole stands 14 px behind (left of) the respawn point so the prince
+    // never hides it, with the pennant pointing back toward the start.
     for (i, cp) in level.checkpoints.iter().enumerate() {
-        let base = cp.area.x + cp.area.w * 0.5;
+        let base = cp.spawn.x.round() - 14.0;
         let floor = cp.spawn.y;
         rect_sprite(
             &mut commands,
-            gc::Rect::new(base - 1.0, floor, 2.0, 34.0),
+            gc::Rect::new(base - 1.0, floor, 2.0, 36.0),
             POLE_COLOR,
-            Z_DECOR,
+            Z_CHECKPOINT,
+        );
+        rect_sprite(
+            &mut commands,
+            gc::Rect::new(base - 2.0, floor + 36.0, 4.0, 2.0),
+            POLE_CAP,
+            Z_CHECKPOINT + 0.01,
         );
         commands.spawn((
             CheckpointFlag(i),
             Sprite::from_color(FLAG_IDLE, Vec2::new(12.0, 8.0)),
-            Transform::from_xyz(base + 7.0, floor + 29.0, Z_DECOR + 0.01),
+            Transform::from_xyz(base - 7.0, floor + 31.0, Z_CHECKPOINT + 0.01),
         ));
     }
 
-    // Goal: a glowing doorway.
+    // --- Exit door (placeholder, same footprint as the goal trigger) --------
     let g = level.goal;
-    rect_sprite(&mut commands, g.inset(-2.0), GOAL_FRAME, Z_GOAL);
-    rect_sprite(&mut commands, g.inset(2.0), GOAL_INNER, Z_GOAL + 0.01);
+    rect_sprite(&mut commands, g.inset(-2.0), DOOR_FRAME, Z_GOAL);
+    rect_sprite(&mut commands, g, DOOR_SHADOW, Z_GOAL + 0.01);
+    // Pale light spilling through the doorway, brightest at the threshold.
+    rect_sprite(
+        &mut commands,
+        gc::Rect::new(g.x + 6.0, g.y, g.w - 12.0, g.h - 10.0),
+        DOOR_GLOW,
+        Z_GOAL + 0.02,
+    );
+    rect_sprite(
+        &mut commands,
+        gc::Rect::new(g.x + 10.0, g.y, g.w - 20.0, g.h - 18.0),
+        DOOR_LIGHT,
+        Z_GOAL + 0.03,
+    );
 
-    // Placeholder hero. Sprites are center-anchored; the root sits at the
-    // feet, so the body is offset up by half its height.
+    // --- Prince ----------------------------------------------------------------
+    // The root sits at the simulation's feet point; the atlas sprite is a
+    // child offset so the manifest pivot lands on it (see `animation`).
+    let m = &manifest.0;
+    let prince_image: Handle<Image> = assets.load(PRINCE_ATLAS_PATH);
+    let prince_layout = layouts.add(TextureAtlasLayout::from_grid(
+        UVec2::new(m.frame_width, m.frame_height),
+        PRINCE_ATLAS_COLUMNS,
+        1,
+        None,
+        None,
+    ));
+    let first = m.clip("idle").map_or(0, |c| c.frames[0]);
     let pos = snap(Vec2::new(level.spawn.x, level.spawn.y));
     commands
         .spawn((
@@ -140,63 +160,36 @@ pub fn spawn_level(
         ))
         .with_children(|p| {
             p.spawn((
-                PlayerCape,
-                Sprite::from_color(HERO_CAPE, Vec2::new(6.0, 14.0)),
-                Transform::from_xyz(-5.0, cfg.player_height - 13.0, -0.1),
-            ));
-            p.spawn((
-                Sprite::from_color(HERO_COLOR, Vec2::new(cfg.player_width, cfg.player_height)),
-                Transform::from_xyz(0.0, cfg.player_height * 0.5, 0.0),
-            ));
-            p.spawn((
-                PlayerFace,
-                Sprite::from_color(HERO_FACE_COLOR, Vec2::new(4.0, 4.0)),
-                Transform::from_xyz(3.0, cfg.player_height - 6.0, 0.1),
+                PrinceSprite::default(),
+                Sprite::from_atlas_image(
+                    prince_image,
+                    TextureAtlas {
+                        layout: prince_layout,
+                        index: first,
+                    },
+                ),
+                Transform::from_translation(crate::animation::sprite_offset(m).extend(0.0)),
             ));
         });
 }
 
-type FaceQuery<'w, 's> = Query<
-    'w,
-    's,
-    &'static mut Transform,
-    (With<PlayerFace>, Without<PlayerRoot>, Without<PlayerCape>),
->;
-type CapeQuery<'w, 's> = Query<
-    'w,
-    's,
-    &'static mut Transform,
-    (With<PlayerCape>, Without<PlayerRoot>, Without<PlayerFace>),
->;
-
 pub fn sync_player(
     sim: Res<GameSim>,
     mut root: Query<(&mut Transform, &mut Visibility), With<PlayerRoot>>,
-    mut face: FaceQuery,
-    mut cape: CapeQuery,
 ) {
-    let p = &sim.0.player;
     let pos = sim.0.interpolated_position();
     let pos = snap(Vec2::new(pos.x, pos.y));
     if let Ok((mut t, mut vis)) = root.single_mut() {
         t.translation.x = pos.x;
         t.translation.y = pos.y;
-        *vis = if sim.0.death_progress().is_some() {
+        let want = if sim.0.death_progress().is_some() {
             Visibility::Hidden
         } else {
             Visibility::Inherited
         };
-    }
-    let facing = f32::from(p.facing);
-    if let Ok(mut t) = face.single_mut() {
-        t.translation.x = 3.0 * facing;
-    }
-    if let Ok(mut t) = cape.single_mut() {
-        // Cape trails behind and lifts with speed: quantized to whole pixels.
-        let lift = (-p.velocity.y / 120.0).clamp(-2.0, 3.0).round();
-        let sway = (p.velocity.x.abs() / 65.0).clamp(0.0, 2.0).round();
-        t.translation.x = -facing * (5.0 + sway);
-        t.translation.y = sim.0.config.player_height - 13.0 + lift;
+        if *vis != want {
+            *vis = want;
+        }
     }
 }
 
