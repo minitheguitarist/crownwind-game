@@ -32,6 +32,8 @@ impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(ClearColor(world::BACKGROUND))
             .insert_resource(AutoPause(true))
+            .init_resource::<ArtHandles>()
+            .init_resource::<ArtReady>()
             .insert_resource(animation::PrinceManifest(
                 manifest::AnimationManifest::prince(),
             ))
@@ -52,6 +54,7 @@ impl Plugin for GamePlugin {
             .add_systems(
                 Update,
                 (
+                    check_art_ready,
                     control_keys,
                     pause_on_focus_loss,
                     simulate,
@@ -68,6 +71,30 @@ impl Plugin for GamePlugin {
                 )
                     .chain(),
             );
+    }
+}
+
+/// Handles of the artwork the scene needs before play starts.
+#[derive(Resource, Default)]
+pub struct ArtHandles(pub Vec<UntypedHandle>);
+
+/// Set once every handle in [`ArtHandles`] has loaded. Gameplay (and debug
+/// screenshot timers) wait for it, so play never starts under a black screen.
+#[derive(Resource, Default)]
+pub struct ArtReady(pub bool);
+
+fn check_art_ready(art: Res<ArtHandles>, server: Res<AssetServer>, mut ready: ResMut<ArtReady>) {
+    if ready.0 {
+        return;
+    }
+    if !art.0.is_empty()
+        && art
+            .0
+            .iter()
+            .all(|h| server.is_loaded_with_dependencies(h.id()))
+    {
+        ready.0 = true;
+        info!("artwork loaded");
     }
 }
 
@@ -126,7 +153,11 @@ fn simulate(
     time: Res<Time>,
     mut sim: ResMut<GameSim>,
     autoplay: Option<ResMut<debug::Autoplay>>,
+    ready: Res<ArtReady>,
 ) {
+    if !ready.0 {
+        return;
+    }
     if let Some(mut auto) = autoplay {
         debug::run_autoplay(&time, &mut auto, &mut sim.0);
         return;

@@ -13,6 +13,7 @@
 
 use bevy::prelude::*;
 
+use crate::ArtHandles;
 use crate::VIRTUAL_WIDTH;
 use crate::view::MainCamera;
 
@@ -45,9 +46,15 @@ pub fn forest_copy(camera_x: f32, k: i32) -> (f32, bool) {
     (k as f32 * w - local, k.rem_euclid(2) == 1)
 }
 
-pub fn spawn_backdrop(mut commands: Commands, assets: Res<AssetServer>) {
+pub fn spawn_backdrop(
+    mut commands: Commands,
+    assets: Res<AssetServer>,
+    mut art: ResMut<ArtHandles>,
+) {
     let sky: Handle<Image> = assets.load(SKY_PATH);
     let forest: Handle<Image> = assets.load(FOREST_PATH);
+    art.0.push(sky.clone().untyped());
+    art.0.push(forest.clone().untyped());
     commands.spawn((
         SkyPlate,
         Sprite::from_image(sky),

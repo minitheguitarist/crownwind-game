@@ -6,7 +6,8 @@
 //! - `CROWNWIND_AUTOPLAY=1`: plan a route with `game_core::route` and feed
 //!   its inputs to the simulation instead of the keyboard (end-to-end demo).
 //! - `CROWNWIND_SCREENSHOT=<file.png>`: save a screenshot of the window and
-//!   exit. `CROWNWIND_SCREENSHOT_AT=<seconds>` sets when (default 1.5 s).
+//!   exit. `CROWNWIND_SCREENSHOT_AT=<seconds>` sets when (default 1.5 s),
+//!   counted from the moment all artwork has loaded.
 
 use std::collections::VecDeque;
 
@@ -14,7 +15,7 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use game_core as gc;
 
-use crate::{AutoPause, GameSim};
+use crate::{ArtReady, AutoPause, GameSim};
 
 pub struct DebugPlugin;
 
@@ -103,7 +104,12 @@ fn screenshot_and_exit(
     time: Res<Time>,
     mut req: ResMut<ScreenshotRequest>,
     mut exit: MessageWriter<AppExit>,
+    ready: Res<ArtReady>,
 ) {
+    // Count time from the moment the artwork is on screen.
+    if !ready.0 {
+        return;
+    }
     req.elapsed += time.delta_secs();
     if !req.taken && req.elapsed >= req.at {
         req.taken = true;

@@ -38,15 +38,30 @@ const RUN_EXIT_SPEED: f32 = 8.0;
 /// ledge or down a stair) keep the ground pose for a moment: no flicker.
 const LEDGE_GRACE_FALL_SPEED: f32 = -80.0;
 
-/// Pick the animation for the current player state.
-pub fn choose_state(prev: AnimState, p: &gc::PlayerState) -> AnimState {
+/// True when the player stands on a solid, even before the simulation has
+/// taken its first step (a freshly spawned `PlayerState` is not yet marked
+/// `grounded`, which would otherwise flash the fall pose at spawn/respawn).
+pub fn standing(p: &gc::PlayerState, level: &gc::Level, cfg: &gc::MovementConfig) -> bool {
+    if p.grounded {
+        return true;
+    }
+    if p.velocity.y != 0.0 {
+        return false;
+    }
+    let probe = gc::movement::hitbox_at(gc::Vec2::new(p.position.x, p.position.y - 0.5), cfg);
+    level.solids.iter().any(|s| s.overlaps(&probe))
+}
+
+/// Pick the animation for the current player state. `grounded` should come
+/// from [`standing`].
+pub fn choose_state(prev: AnimState, p: &gc::PlayerState, grounded: bool) -> AnimState {
     let on_ground_pose = matches!(prev, AnimState::Idle | AnimState::Run);
-    let grace = !p.grounded
+    let grace = !grounded
         && on_ground_pose
         && p.coyote_timer > 0.0
         && p.velocity.y <= 0.0
         && p.velocity.y > LEDGE_GRACE_FALL_SPEED;
-    if p.grounded || grace {
+    if grounded || grace {
         let speed = p.velocity.x.abs();
         let running = if prev == AnimState::Run {
             speed > RUN_EXIT_SPEED
@@ -144,7 +159,8 @@ pub fn animate_prince(
     let p = &sim.0.player;
     let offset = sprite_offset(m);
     for (mut sprite, mut t, mut prince) in &mut q {
-        let next = choose_state(prince.animator.state, p);
+        let grounded = standing(p, &sim.0.level, &sim.0.config);
+        let next = choose_state(prince.animator.state, p, grounded);
         prince.animator.update(next, dt);
         let index = prince.animator.frame(m);
         if let Some(atlas) = sprite.texture_atlas.as_mut()
@@ -175,15 +191,27 @@ mod tests {
     #[test]
     fn grounded_states() {
         let mut p = player();
-        assert_eq!(choose_state(AnimState::Idle, &p), AnimState::Idle);
+        assert_eq!(
+            choose_state(AnimState::Idle, &p, p.grounded),
+            AnimState::Idle
+        );
         p.velocity.x = 130.0;
-        assert_eq!(choose_state(AnimState::Idle, &p), AnimState::Run);
+        assert_eq!(
+            choose_state(AnimState::Idle, &p, p.grounded),
+            AnimState::Run
+        );
         // Hysteresis: slowing to 12 px/s keeps running, 5 px/s stops.
         p.velocity.x = 12.0;
-        assert_eq!(choose_state(AnimState::Run, &p), AnimState::Run);
-        assert_eq!(choose_state(AnimState::Idle, &p), AnimState::Idle);
+        assert_eq!(choose_state(AnimState::Run, &p, p.grounded), AnimState::Run);
+        assert_eq!(
+            choose_state(AnimState::Idle, &p, p.grounded),
+            AnimState::Idle
+        );
         p.velocity.x = -5.0;
-        assert_eq!(choose_state(AnimState::Run, &p), AnimState::Idle);
+        assert_eq!(
+            choose_state(AnimState::Run, &p, p.grounded),
+            AnimState::Idle
+        );
     }
 
     #[test]
@@ -191,9 +219,15 @@ mod tests {
         let mut p = player();
         p.grounded = false;
         p.velocity.y = 200.0;
-        assert_eq!(choose_state(AnimState::Run, &p), AnimState::Jump);
+        assert_eq!(
+            choose_state(AnimState::Run, &p, p.grounded),
+            AnimState::Jump
+        );
         p.velocity.y = -200.0;
-        assert_eq!(choose_state(AnimState::Jump, &p), AnimState::Fall);
+        assert_eq!(
+            choose_state(AnimState::Jump, &p, p.grounded),
+            AnimState::Fall
+        );
     }
 
     #[test]
@@ -203,12 +237,36 @@ mod tests {
         p.coyote_timer = 0.08;
         p.velocity.x = 130.0;
         p.velocity.y = -20.0;
-        assert_eq!(choose_state(AnimState::Run, &p), AnimState::Run);
+        assert_eq!(choose_state(AnimState::Run, &p, p.grounded), AnimState::Run);
         p.velocity.y = -150.0;
-        assert_eq!(choose_state(AnimState::Run, &p), AnimState::Fall);
+        assert_eq!(
+            choose_state(AnimState::Run, &p, p.grounded),
+            AnimState::Fall
+        );
         // No grace once already airborne.
         p.velocity.y = -20.0;
-        assert_eq!(choose_state(AnimState::Fall, &p), AnimState::Fall);
+        assert_eq!(
+            choose_state(AnimState::Fall, &p, p.grounded),
+            AnimState::Fall
+        );
+    }
+
+    #[test]
+    fn fresh_spawn_on_ground_shows_idle_not_fall() {
+        let level = gc::tutorial_level();
+        let cfg = gc::MovementConfig::default();
+        let p = gc::PlayerState::at(level.spawn); // grounded == false
+        assert!(!p.grounded);
+        assert!(standing(&p, &level, &cfg));
+        assert_eq!(
+            choose_state(AnimState::Fall, &p, standing(&p, &level, &cfg)),
+            AnimState::Idle
+        );
+        // Same position but falling: not standing.
+        let mut q = p;
+        q.position.y += 40.0;
+        q.velocity.y = -10.0;
+        assert!(!standing(&q, &level, &cfg));
     }
 
     #[test]

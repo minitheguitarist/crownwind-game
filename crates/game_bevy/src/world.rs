@@ -8,10 +8,10 @@
 use bevy::prelude::*;
 use game_core as gc;
 
-use crate::GameSim;
 use crate::animation::{PrinceManifest, PrinceSprite};
 use crate::manifest::{PRINCE_ATLAS_COLUMNS, PRINCE_ATLAS_PATH};
 use crate::tiles::{self, Layer, TILE, TILE_COLUMNS, TILES_PATH};
+use crate::{ArtHandles, GameSim};
 
 /// Letterbox bars and anything outside the 480×270 view.
 pub const BACKGROUND: Color = Color::srgb(0.06, 0.05, 0.08);
@@ -59,11 +59,13 @@ pub fn spawn_level(
     manifest: Res<PrinceManifest>,
     assets: Res<AssetServer>,
     mut layouts: ResMut<Assets<TextureAtlasLayout>>,
+    mut art: ResMut<ArtHandles>,
 ) {
     let level = &sim.0.level;
 
     // --- Terrain, plants, thorns from the Windwood atlas --------------------
     let tiles_image: Handle<Image> = assets.load(TILES_PATH);
+    art.0.push(tiles_image.clone().untyped());
     let tiles_layout = layouts.add(TextureAtlasLayout::from_grid(
         UVec2::splat(TILE as u32),
         TILE_COLUMNS,
@@ -143,6 +145,7 @@ pub fn spawn_level(
     // child offset so the manifest pivot lands on it (see `animation`).
     let m = &manifest.0;
     let prince_image: Handle<Image> = assets.load(PRINCE_ATLAS_PATH);
+    art.0.push(prince_image.clone().untyped());
     let prince_layout = layouts.add(TextureAtlasLayout::from_grid(
         UVec2::new(m.frame_width, m.frame_height),
         PRINCE_ATLAS_COLUMNS,
