@@ -58,8 +58,11 @@ pub struct MovementConfig {
 impl Default for MovementConfig {
     fn default() -> Self {
         Self {
-            player_width: 12.0,
-            player_height: 24.0,
+            // Matches the prince art (32×48 cells, pivot (16,44)): legs and
+            // torso span pivot −6..+7 px, the head top is 40 px above the
+            // ground line (hair). 38 px leaves ≤2 px of hair over ceilings.
+            player_width: 14.0,
+            player_height: 38.0,
             max_run_speed: 130.0,
             ground_accel: 1400.0,
             ground_friction: 1600.0,

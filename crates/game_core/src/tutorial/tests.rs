@@ -265,3 +265,39 @@ fn chimneys_cannot_be_skipped_without_wall_jumps() {
         "second chimney is skippable"
     );
 }
+
+#[test]
+fn walk_under_clearances_fit_the_collider() {
+    // Every overhang the player must walk under (chimney entrances) leaves
+    // at least 2 px of head room above the 38 px collider.
+    let level = tutorial_level();
+    let cfg = MovementConfig::default();
+    for (x_tile, floor_ty, overhang_ty) in [(99, 2, 5), (167, 2, 5)] {
+        let gap = (overhang_ty - floor_ty) as f32 * TILE_SIZE;
+        assert!(gap >= cfg.player_height + 2.0, "overhang at {x_tile}");
+        let feet = Vec2::new(x_tile as f32 * TILE_SIZE + 8.0, floor_ty as f32 * TILE_SIZE);
+        let hb = hitbox_at(feet, &cfg);
+        assert!(
+            level.solids.iter().all(|s| !s.overlaps(&hb)),
+            "stuck under {x_tile}"
+        );
+    }
+}
+
+#[test]
+fn respawning_at_each_checkpoint_is_stable() {
+    // Respawn, settle for a second with no input: grounded, unmoved, alive.
+    let level = tutorial_level();
+    let cfg = MovementConfig::default();
+    for i in 0..level.checkpoints.len() {
+        let mut sim = Simulation::new(level.clone(), cfg);
+        sim.start_at_checkpoint(i);
+        for _ in 0..60 {
+            sim.fixed_step(crate::PlayerInput::default());
+        }
+        assert_eq!(sim.phase, Phase::Playing, "checkpoint {i}");
+        assert!(sim.player.grounded, "checkpoint {i} not grounded");
+        assert_eq!(sim.player.position, level.checkpoints[i].spawn);
+        assert_eq!(sim.deaths, 0);
+    }
+}

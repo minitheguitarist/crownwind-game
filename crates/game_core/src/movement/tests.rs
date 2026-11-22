@@ -377,10 +377,11 @@ fn airborne_on_right_wall(solids: &[Rect]) -> PlayerState {
 fn wall_contact_is_detected_on_both_sides() {
     let cfg = MovementConfig::default();
     let solids = chimney();
-    let mut s = PlayerState::at(Vec2::new(-24.0 + 6.0, 100.0));
+    let half = cfg.player_width * 0.5;
+    let mut s = PlayerState::at(Vec2::new(-24.0 + half, 100.0));
     s = step(&s, PlayerInput::default(), &cfg, &solids, DT);
     assert_eq!(s.wall_dir, -1);
-    let mut s = PlayerState::at(Vec2::new(24.0 - 6.0, 100.0));
+    let mut s = PlayerState::at(Vec2::new(24.0 - half, 100.0));
     s = step(&s, PlayerInput::default(), &cfg, &solids, DT);
     assert_eq!(s.wall_dir, 1);
     let mut s = PlayerState::at(Vec2::new(0.0, 100.0));
@@ -607,7 +608,7 @@ fn wall_jump_respects_jump_buffer() {
     // Press jump just before touching the wall; it fires on contact.
     let cfg = MovementConfig::default();
     let solids = right_wall();
-    let mut s = PlayerState::at(Vec2::new(30.0 - 6.0 - 1.5, 120.0));
+    let mut s = PlayerState::at(Vec2::new(30.0 - cfg.player_width * 0.5 - 1.5, 120.0));
     s.velocity.x = 130.0;
     s = step(&s, input(1.0, true, true), &cfg, &solids, DT);
     assert_eq!(s.wall_dir, 1);
@@ -686,8 +687,12 @@ fn running_across_seam_between_floor_tiles_does_not_snag() {
 fn head_clipping_ceiling_corner_is_nudged_past() {
     let cfg = MovementConfig::default();
     // Ceiling whose left edge overlaps the hitbox by 3 px.
-    let ceiling = Rect::new(3.0, 40.0, 100.0, 16.0);
-    let mut s = PlayerState::at(Vec2::new(-6.0 + 0.0, 0.0));
+    let ceiling = Rect::new(3.0, cfg.player_height + 16.0, 100.0, 16.0);
+    let mut s = PlayerState::at(Vec2::new(
+        ceiling.left() + 3.0 - cfg.player_width * 0.5,
+        0.0,
+    ));
+    assert_eq!(s.hitbox(&cfg).right() - ceiling.left(), 3.0);
     let solids = [floor(), ceiling];
     s = step(&s, PlayerInput::default(), &cfg, &solids, DT);
     s = step(&s, PRESS, &cfg, &solids, DT);
@@ -706,7 +711,8 @@ fn head_clipping_ceiling_corner_is_nudged_past() {
 #[test]
 fn large_ceiling_overlap_still_blocks() {
     let cfg = MovementConfig::default();
-    let ceiling = Rect::new(-2.0, 40.0, 100.0, 16.0); // 6 px overlap
+    // Hitbox spans -7..7: overlapping the ceiling by 9 px (> 4 px nudge).
+    let ceiling = Rect::new(-2.0, cfg.player_height + 16.0, 100.0, 16.0);
     let solids = [floor(), ceiling];
     let mut s = step(&settled_on_floor(), PRESS, &cfg, &solids, DT);
     let mut max_top = s.hitbox(&cfg).top();
@@ -730,4 +736,85 @@ fn wall_jumping_is_deterministic() {
         s
     };
     assert_eq!(go(), go());
+}
+
+// ---------------------------------------------------------------------------
+// Collider vs. art (M1.6): 14×38 collider, regression tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn collider_matches_prince_art_dimensions() {
+    // Measured from assets/characters/prince_debug.png (pivot (16,44)):
+    // head top 40 px above the ground line, legs/torso pivot-6..+7.
+    let cfg = MovementConfig::default();
+    assert_eq!(cfg.player_width, 14.0);
+    assert_eq!(cfg.player_height, 38.0);
+    let hair_over = 40.0 - cfg.player_height;
+    assert!((0.0..=2.0).contains(&hair_over));
+}
+
+#[test]
+fn head_stops_exactly_at_ceiling() {
+    let cfg = MovementConfig::default();
+    // Ceiling 20 px above the head while standing.
+    let ceiling = Rect::new(-50.0, cfg.player_height + 20.0, 100.0, 16.0);
+    let solids = [floor(), ceiling];
+    let mut s = step(&settled_on_floor(), PRESS, &cfg, &solids, DT);
+    let mut max_top: f32 = 0.0;
+    for _ in 0..60 {
+        s = step(&s, input(0.0, false, true), &cfg, &solids, DT);
+        max_top = max_top.max(s.hitbox(&cfg).top());
+    }
+    assert_eq!(max_top, ceiling.bottom(), "head should touch, not pass");
+    assert!(s.grounded);
+    assert_eq!(s.position.y, 0.0);
+}
+
+#[test]
+fn low_clearance_passage_fits_only_if_taller_than_collider() {
+    let cfg = MovementConfig::default();
+    let run_right = |clearance: f32| {
+        let roof = Rect::new(40.0, clearance, 120.0, 16.0);
+        let solids = [floor(), roof];
+        run(settled_on_floor(), input(1.0, false, false), &solids, 120)
+    };
+    // 40 px of head room (2 px spare): walks straight through.
+    let through = run_right(cfg.player_height + 2.0);
+    assert!(through.position.x > 160.0, "{:?}", through.position);
+    assert!(through.grounded);
+    // 36 px: the roof's edge acts as a wall at head height.
+    let blocked = run_right(cfg.player_height - 2.0);
+    assert_eq!(blocked.hitbox(&cfg).right(), 40.0);
+}
+
+#[test]
+fn landing_under_low_ledge_keeps_head_clear() {
+    // Falling between a floor and a ledge 3 tiles up: lands on the floor
+    // without the head ever overlapping the ledge above.
+    let cfg = MovementConfig::default();
+    let ledge = Rect::new(-50.0, 48.0, 100.0, 16.0);
+    let solids = [floor(), ledge];
+    let mut s = PlayerState::at(Vec2::new(0.0, 5.0));
+    for _ in 0..60 {
+        s = step(&s, PlayerInput::default(), &cfg, &solids, DT);
+        assert!(!s.hitbox(&cfg).overlaps(&ledge));
+    }
+    assert!(s.grounded);
+    assert_eq!(s.position.y, 0.0);
+}
+
+#[test]
+fn wall_contact_registers_at_head_height() {
+    // A block touching only the upper body still counts as a wall.
+    let cfg = MovementConfig::default();
+    let half = cfg.player_width * 0.5;
+    let block = Rect::new(half, 130.0, 16.0, 30.0); // body spans 100..138
+    let mut s = PlayerState::at(Vec2::new(0.0, 100.0));
+    s = step(&s, PlayerInput::default(), &cfg, &[block], DT);
+    assert_eq!(s.wall_dir, 1);
+    // Just above the head: no contact.
+    let above = Rect::new(half, 100.0 + cfg.player_height + 8.0, 16.0, 30.0);
+    let mut s = PlayerState::at(Vec2::new(0.0, 100.0));
+    s = step(&s, PlayerInput::default(), &cfg, &[above], DT);
+    assert_eq!(s.wall_dir, 0);
 }
